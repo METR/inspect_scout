@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 from functools import reduce
 from os import PathLike
+from pathlib import Path
 from types import TracebackType
 from typing import (
     Any,
@@ -16,7 +17,9 @@ from typing import (
 )
 
 import pandas as pd
-from inspect_ai._util.asyncfiles import AsyncFilesystem
+from inspect_ai._util.asyncfiles import AsyncFilesystem, is_s3_filename
+from inspect_ai._util.file import FileInfo, filesystem
+from inspect_ai._util.kvstore import inspect_kvstore
 from inspect_ai.analysis._dataframe.columns import Column
 from inspect_ai.analysis._dataframe.evals.columns import (
     EvalColumn,
@@ -34,12 +37,16 @@ from inspect_ai.analysis._dataframe.samples.extract import (
     sample_input_as_str,
     sample_total_tokens,
 )
-from inspect_ai.analysis._dataframe.samples.table import samples_df
+from inspect_ai.analysis._dataframe.samples.table import (
+    _read_samples_df_serial,
+    samples_df,
+)
 from inspect_ai.analysis._dataframe.util import (
     verify_prerequisites as verify_df_prerequisites,
 )
 from inspect_ai.log._file import (
     EvalLogInfo,
+    log_files_from_ls,
 )
 from pydantic import JsonValue
 from typing_extensions import override
@@ -189,7 +196,7 @@ class EvalLogTranscriptsDB:
 
         # resolve logs or df to transcript_df (sample per row)
         if not isinstance(logs, pd.DataFrame):
-            self._transcripts_df = samples_df(logs, TranscriptColumns, parallel=False)
+            self._transcripts_df = self._build_transcripts_df(logs)
         else:
             self._transcripts_df = logs
 
@@ -201,6 +208,84 @@ class EvalLogTranscriptsDB:
 
         # LocalFilesCache (starts out none)
         self._files_cache: LocalFilesCache | None = None
+
+    def _build_transcripts_df(self, logs: LogPaths) -> pd.DataFrame:
+        """Build transcripts DataFrame from logs, using S3 cache when available.
+
+        Args:
+            logs: Log paths to process
+
+        Returns:
+            DataFrame with one row per transcript/sample
+        """
+        import pandas as pd
+
+        try:
+            # Resolve logs to (path, etag) tuples
+            resolved_logs = resolve_logs_with_etag(logs)
+
+            # Separate S3 and local paths
+            s3_logs: list[tuple[str, str | None]] = []
+            local_logs: list[str] = []
+
+            for log_path, etag in resolved_logs:
+                if is_s3_filename(log_path):
+                    s3_logs.append((log_path, etag))
+                else:
+                    local_logs.append(log_path)
+
+            # Build DataFrame from cached/fresh S3 logs and local logs
+            dfs: list[pd.DataFrame] = []
+
+            # Process S3 logs with caching
+            if s3_logs:
+                with inspect_kvstore("scout_s3_log_cache") as kvstore:
+                    for log_path, etag in s3_logs:
+                        # Try cache first
+                        cached_df = _get_cached_df_for_s3_log(kvstore, log_path, etag)
+
+                        if cached_df is not None:
+                            dfs.append(cached_df)
+                        else:
+                            # Cache miss - read from S3
+                            result = _read_samples_df_serial(
+                                [log_path],
+                                TranscriptColumns,
+                                full=False,
+                                strict=True,
+                                progress=False,
+                            )
+                            # strict=True means we get a DataFrame, not a tuple
+                            assert isinstance(result, pd.DataFrame)
+                            fresh_df = result
+                            dfs.append(fresh_df)
+
+                            # Update cache
+                            _put_cached_df_for_s3_log(kvstore, log_path, etag, fresh_df)
+
+            # Process local logs (no caching)
+            if local_logs:
+                result = _read_samples_df_serial(
+                    local_logs,
+                    TranscriptColumns,
+                    full=False,
+                    strict=True,
+                    progress=False,
+                )
+                # strict=True means we get a DataFrame, not a tuple
+                assert isinstance(result, pd.DataFrame)
+                dfs.append(result)
+
+            # Concatenate all DataFrames
+            if dfs:
+                return pd.concat(dfs, ignore_index=True)
+            else:
+                # Empty DataFrame with correct columns
+                return pd.DataFrame(columns=[col.name for col in TranscriptColumns])
+
+        except Exception:
+            # Fall back to original behavior on any error
+            return samples_df(logs, TranscriptColumns, parallel=False)
 
     async def connect(self) -> None:
         # Skip if already connected
@@ -425,6 +510,115 @@ async def transcripts_df_for_results(snapshot: ScanTranscripts) -> pd.DataFrame:
             return df.rename(columns=rename_map)
         case _:
             raise ValueError(f"Unrecognized transcript type '{snapshot.type}")
+
+
+def resolve_logs_with_etag(logs: LogPaths) -> list[tuple[str, str | None]]:
+    """Resolve log paths to list of (path, etag) tuples.
+
+    Similar to inspect_ai's resolve_logs(), but also returns etag for each log file.
+    Etag is provided by S3 filesystems for cache invalidation.
+
+    TODO: Consider updating inspect_ai's resolve_logs() to optionally return etags.
+
+    Args:
+        logs: Log paths to resolve (can be files, directories, or EvalLogInfo objects)
+
+    Returns:
+        List of (path, etag) tuples where etag may be None for non-S3 filesystems
+    """
+    # Normalize to list of str
+    logs = [logs] if isinstance(logs, str | PathLike | EvalLogInfo) else logs
+    logs_str = [
+        Path(log).as_posix()
+        if isinstance(log, PathLike)
+        else log.name
+        if isinstance(log, EvalLogInfo)
+        else log
+        for log in logs
+    ]
+
+    # Expand directories
+    log_paths: list[FileInfo] = []
+    for log_str in logs_str:
+        fs = filesystem(log_str)
+        info = fs.info(log_str)
+        if info.type == "directory":
+            log_paths.extend(
+                [fi for fi in fs.ls(info.name, recursive=True) if fi.type == "file"]
+            )
+        else:
+            log_paths.append(info)
+
+    log_files = log_files_from_ls(log_paths, sort=False)
+
+    # Create dict mapping log file name to etag from FileInfo
+    etag_map = {fi.name: fi.etag for fi in log_paths}
+
+    return [(log_file.name, etag_map.get(log_file.name)) for log_file in log_files]
+
+
+def _get_cached_df_for_s3_log(
+    kvstore: Any, log_path: str, current_etag: str | None
+) -> pd.DataFrame | None:
+    """Retrieve cached DataFrame for S3 log file if etag matches.
+
+    Args:
+        kvstore: KVStore instance for caching
+        log_path: S3 path to log file
+        current_etag: Current etag from S3
+
+    Returns:
+        Cached DataFrame if etag matches, None otherwise
+    """
+    try:
+        cached_value = kvstore.get(log_path)
+        if cached_value is None:
+            return None
+
+        cached_data = json.loads(cached_value)
+        cached_etag = cached_data.get("etag")
+
+        # Check if etag matches
+        if cached_etag != current_etag:
+            return None
+
+        # Reconstruct DataFrame from records
+        records = cached_data.get("records", [])
+        if not records:
+            return None
+
+        return pd.DataFrame.from_records(records)
+
+    except Exception:
+        # On any error, return None to fall back to reading from S3
+        return None
+
+
+def _put_cached_df_for_s3_log(
+    kvstore: Any, log_path: str, etag: str | None, df: pd.DataFrame
+) -> None:
+    """Store DataFrame for S3 log file in cache with etag.
+
+    Args:
+        kvstore: KVStore instance for caching
+        log_path: S3 path to log file
+        etag: Etag from S3 for cache invalidation
+        df: DataFrame to cache
+    """
+    try:
+        # Serialize DataFrame to JSON records
+        records = json.loads(df.to_json(orient="records"))
+
+        cache_data = {
+            "etag": etag,
+            "records": records,
+        }
+
+        kvstore.put(log_path, json.dumps(cache_data))
+
+    except Exception:
+        # Silently fail on cache write errors
+        pass
 
 
 TranscriptColumns: list[Column] = (

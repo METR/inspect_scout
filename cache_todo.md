@@ -8,7 +8,7 @@ Cache DataFrame rows per S3 log file using KVStore with etag-based invalidation 
 ### Phase 1: Create Enhanced resolve_logs Function
 **File:** `src/inspect_scout/_transcript/database.py`
 
-- [ ] Create `resolve_logs_with_etag()` function that:
+- [x] Create `resolve_logs_with_etag()` function that:
   - Copies logic from inspect_ai's `resolve_logs()`
   - Returns `list[tuple[str, str | None]]` where tuple is `(path, etag)`
   - Etag extracted from `FileInfo.etag` returned by `fs.info()`
@@ -17,45 +17,57 @@ Cache DataFrame rows per S3 log file using KVStore with etag-based invalidation 
 ### Phase 2: Create S3 Cache Helper Functions
 **File:** `src/inspect_scout/_transcript/database.py`
 
-- [ ] Add `_get_cached_df_for_s3_log(kvstore, log_path, current_etag) -> pd.DataFrame | None`
+- [x] Add `_get_cached_df_for_s3_log(kvstore, log_path, current_etag) -> pd.DataFrame | None`
   - Check cache, return DataFrame if etag matches, None otherwise
 
-- [ ] Add `_put_cached_df_for_s3_log(kvstore, log_path, etag, df)`
+- [x] Add `_put_cached_df_for_s3_log(kvstore, log_path, etag, df)`
   - Serialize df subset as JSON: `{"etag": ..., "records": [...]}`
   - Store in KVStore with log path as key
 
-- [ ] Use `is_s3_filename()` for S3 detection
+- [x] Use `is_s3_filename()` for S3 detection
 
 ### Phase 3: Modify EvalLogTranscriptsDB Constructor
-**File:** `src/inspect_scout/_transcript/database.py` (lines 185-204)
+**File:** `src/inspect_scout/_transcript/database.py` (lines 192-283)
 
 Replace `samples_df()` call with:
 
-- [ ] Call `resolve_logs_with_etag()` to get `list[(path, etag)]`
-- [ ] Separate S3 paths from local paths
-- [ ] Open KVStore: `inspect_kvstore("scout_s3_log_cache")`
-- [ ] For each S3 path:
+- [x] Call `resolve_logs_with_etag()` to get `list[(path, etag)]`
+- [x] Separate S3 paths from local paths
+- [x] Open KVStore: `inspect_kvstore("scout_s3_log_cache")`
+- [x] For each S3 path:
   - Try `_get_cached_df_for_s3_log()`
   - If hit: use cached DataFrame
   - If miss: call `_read_samples_df_serial([log_path], ...)` to get rows, then `_put_cached_df_for_s3_log()`
-- [ ] For local paths: call `_read_samples_df_serial()` directly
-- [ ] Concatenate all DataFrames (cached + freshly read)
-- [ ] Fall back to current behavior on any errors
+- [x] For local paths: call `_read_samples_df_serial()` directly
+- [x] Concatenate all DataFrames (cached + freshly read)
+- [x] Fall back to current behavior on any errors
 
 ### Phase 4: Import Additions
 
-- [ ] Import `_read_samples_df_serial` from `inspect_ai.analysis._dataframe.samples.table`
-- [ ] Import `inspect_kvstore` from `inspect_ai._util.kvstore`
-- [ ] Import `is_s3_filename` from `inspect_ai._util.asyncfiles`
-- [ ] Import `filesystem` from `inspect_ai._util.file`
+- [x] Import `_read_samples_df_serial` from `inspect_ai.analysis._dataframe.samples.table`
+- [x] Import `inspect_kvstore` from `inspect_ai._util.kvstore`
+- [x] Import `is_s3_filename` from `inspect_ai._util.asyncfiles`
+- [x] Import `filesystem` from `inspect_ai._util.file`
 
 ## Testing Strategy
 
-- [ ] Test with S3 paths (cache miss, then cache hit)
-- [ ] Test with local paths (no caching)
-- [ ] Test with mixed S3 + local paths
-- [ ] Test etag mismatch (cache invalidation)
-- [ ] Test cache corruption (fallback to direct read)
+- [x] Verified all existing tests pass (642 passed, 6 skipped)
+- [ ] Manual test with S3 paths (cache miss, then cache hit) - requires S3 setup
+- [ ] Manual test with local paths (no caching)
+- [ ] Manual test with mixed S3 + local paths
+- [ ] Manual test etag mismatch (cache invalidation)
+- [ ] Manual test cache corruption (fallback to direct read)
+
+## Completed Steps
+
+- [x] All imports added successfully
+- [x] `resolve_logs_with_etag()` function created
+- [x] Cache helper functions `_get_cached_df_for_s3_log()` and `_put_cached_df_for_s3_log()` created
+- [x] `EvalLogTranscriptsDB.__init__()` modified to use `_build_transcripts_df()` method
+- [x] Linting passed (ruff check)
+- [x] Type checking passed (mypy)
+- [x] Formatting verified (ruff format)
+- [x] All existing tests pass (642 passed, 6 skipped)
 
 ## Cache Structure
 
