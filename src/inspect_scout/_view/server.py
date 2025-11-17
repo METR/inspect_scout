@@ -227,6 +227,7 @@ def view_server_app(
         request: Request,
         scan: str,
         query_scanner: str | None = Query(None, alias="scanner"),
+        query_results_dir: str | None = Query(None, alias="results_dir"),
     ) -> Response:
         if query_scanner is None:
             raise HTTPException(
@@ -238,7 +239,7 @@ def view_server_app(
         scan_path = UPath(await _map_file(request, scan))
         if not scan_path.is_absolute():
             validated_results_dir = _ensure_not_none(
-                results_dir, "results_dir is required"
+                query_results_dir or results_dir, "results_dir is required"
             )
             results_path = UPath(validated_results_dir)
             scan_path = results_path / scan_path
@@ -270,12 +271,13 @@ def view_server_app(
         request: Request,
         scan: str,
         status_only: bool | None = Query(None, alias="status_only"),
+        query_results_dir: str | None = Query(None, alias="results_dir"),
     ) -> Response:
         # convert to absolute path
         scan_path = UPath(await _map_file(request, scan))
         if not scan_path.is_absolute():
             validated_results_dir = _ensure_not_none(
-                results_dir, "results_dir is required"
+                query_results_dir or results_dir, "results_dir is required"
             )
             results_path = UPath(validated_results_dir)
             scan_path = results_path / scan_path
@@ -314,12 +316,16 @@ def view_server_app(
         )
 
     @app.get("/scan-delete/{scan:path}")
-    async def scan_delete(request: Request, scan: str) -> Response:
+    async def scan_delete(
+            request: Request,
+            scan: str,
+            query_results_dir: str | None = Query(None, alias="results_dir"),
+    ) -> Response:
         # convert to absolute path
         scan_path = UPath(await _map_file(request, scan))
         if not scan_path.is_absolute():
             validated_results_dir = _ensure_not_none(
-                results_dir, "results_dir is required"
+                query_results_dir or results_dir, "results_dir is required"
             )
             results_path = UPath(validated_results_dir)
             scan_path = results_path / scan_path
