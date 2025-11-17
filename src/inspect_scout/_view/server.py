@@ -215,7 +215,7 @@ def view_server_app(
         await _validate_list(request, validated_results_dir)
         scans = await scan_list_async(await _map_file(request, validated_results_dir))
         for scan in scans:
-            scan.location = await _unmap_file(request, scan.location)
+            scan.location = await _unmap_file(request, f"{validated_results_dir}/{scan.location}")
 
         return InspectPydanticJSONResponse(
             content={"results_dir": validated_results_dir, "scans": scans},
