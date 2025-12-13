@@ -8,4 +8,9 @@ export { apiScoutServer } from "./api/api-scout-server.ts";
 export type { ScanApi } from "./api/api.ts";
 
 // State Store
-export { ApiProvider, StoreProvider, createStore } from "./state/store";
+export {
+  ApiProvider,
+  StoreProvider,
+  createStore,
+  useStore,
+} from "./state/store";

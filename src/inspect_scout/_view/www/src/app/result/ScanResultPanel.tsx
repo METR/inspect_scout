@@ -71,6 +71,14 @@ export const ScanResultPanel: FC = () => {
   const { data: selectedResult, isLoading: resultLoading } =
     useSelectedResultsRow(scanResultUuid);
 
+  const setTranscriptId = useStore((state) => state.setTranscriptId);
+  useEffect(() => {
+    setTranscriptId(selectedResult?.transcriptId);
+    return () => {
+      setTranscriptId(undefined);
+    };
+  }, [setTranscriptId, selectedResult?.transcriptId]);
+
   const status = useStore((state) => state.selectedScanStatus);
 
   // Sync URL tab parameter with store on mount and URL changes

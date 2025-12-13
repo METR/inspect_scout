@@ -1,6 +1,6 @@
 {
-  "name": "@meridianlabs/inspect-scout-viewer",
-  "version": "0.0.1",
+  "name": "@metrevals/inspect-scout-viewer",
+  "version": "0.3.3-beta.1765662729",
   "description": "Inspect Scout viewer for evaluation logs.",
   "license": "MIT",
   "type": "module",
@@ -29,7 +29,7 @@
     "watch": "vite build --watch",
     "watch:dev": "NODE_ENV=development vite build --watch --mode development",
     "dev": "vite",
-    "prepublishOnly": "npm version from-git --no-git-tag-version --allow-same-version && pnpm build:lib",
+    "prepublishOnly": "pnpm build:lib",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",

@@ -71,6 +71,7 @@ interface StoreState {
   dataframeFilterColumns?: string[];
 
   // Transcript
+  transcriptId?: string;
   transcriptCollapsedEvents: Record<string, Record<string, boolean>>;
   transcriptOutlineId?: string;
 
@@ -145,6 +146,8 @@ interface StoreState {
 
   setSelectedResultsTab: (tab: string) => void;
   setSelectedResultTab: (tab: string) => void;
+
+  setTranscriptId: (id?: string) => void;
 
   setTranscriptOutlineId: (id: string) => void;
   clearTranscriptOutlineId: () => void;
@@ -501,6 +504,11 @@ export const createStore = (api: ScanApi) =>
           setSelectedResultTab: (tab: string) => {
             set((state) => {
               state.selectedResultTab = tab;
+            });
+          },
+          setTranscriptId: (id?: string) => {
+            set((state) => {
+              state.transcriptId = id;
             });
           },
           setTranscriptOutlineId: (id: string) => {
