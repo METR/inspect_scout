@@ -1,6 +1,6 @@
 {
-  "name": "@meridianlabs/inspect-scout-viewer",
-  "version": "0.0.1",
+  "name": "@metrevals/inspect-scout-viewer",
+  "version": "0.4.4-beta.20251224075148",
   "description": "Inspect Scout viewer for evaluation logs.",
   "license": "MIT",
   "type": "module",
