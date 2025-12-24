@@ -2,13 +2,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { createRoot } from "react-dom/client";
 
+import "bootstrap-icons/font/bootstrap-icons.css";
+import "bootstrap/dist/css/bootstrap.min.css";
 import { ScanApi } from "./api/api";
 import { apiScoutServer } from "./api/api-scout-server";
 import { apiVscode } from "./api/api-vscode";
 import { webViewJsonRpcClient } from "./api/jsonrpc";
 import { App } from "./App";
-import "bootstrap/dist/css/bootstrap.min.css";
-import "bootstrap-icons/font/bootstrap-icons.css";
 import { ApiProvider, createStore, StoreProvider } from "./state/store";
 import { getVscodeApi } from "./utils/vscode";
 
