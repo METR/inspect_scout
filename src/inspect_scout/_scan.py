@@ -506,19 +506,34 @@ async def _scan_async_inner(
             # write the snapshot
             await recorder.snapshot_transcripts(snapshot)
 
-            # Count already-completed scans to initialize progress
             scanner_names_list = list(scan.scanners.keys())
+
+            if scan.worklist:
+                scanner_to_transcript_ids: dict[str, set[str]] = {
+                    work.scanner: set(work.transcripts) for work in scan.worklist
+                }
+            else:
+                scanner_to_transcript_ids = {}
+
+            per_scanner_total: dict[str, int] = {name: 0 for name in scanner_names_list}
+            per_scanner_skipped: dict[str, int] = {name: 0 for name in scanner_names_list}
             total_scans = 0
             skipped_scans = 0
+
             for transcript_id in snapshot.transcript_ids.keys():
                 for name in scanner_names_list:
-                    if await recorder.is_recorded(transcript_id, name):
-                        skipped_scans += 1
+                    if (
+                        scanner_to_transcript_ids
+                        and transcript_id not in scanner_to_transcript_ids.get(name, set())
+                    ):
+                        continue
+
+                    per_scanner_total[name] += 1
                     total_scans += 1
 
-            # override total scans if there is a worklist
-            if scan.worklist is not None:
-                total_scans = sum(len(work.transcripts) for work in scan.worklist)
+                    if await recorder.is_recorded(transcript_id, name):
+                        per_scanner_skipped[name] += 1
+                        skipped_scans += 1
 
             # start scan
             with display().scan_display(
@@ -527,6 +542,8 @@ async def _scan_async_inner(
                 summary=await recorder.summary(),
                 total=total_scans,
                 skipped=skipped_scans,
+                per_scanner_total=per_scanner_total,
+                per_scanner_skipped=per_scanner_skipped,
             ) as scan_display:
                 # Build scanner list and union content for index resolution
                 scanners_list = list(scan.scanners.values())

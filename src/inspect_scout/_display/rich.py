@@ -73,6 +73,8 @@ class DisplayRich(Display):
         summary: Summary,
         total: int,
         skipped: int,
+        per_scanner_total: dict[str, int] | None = None,
+        per_scanner_skipped: dict[str, int] | None = None,
     ) -> Iterator[ScanDisplay]:
         with ScanDisplayRich(
             scan, scan_location, summary, total, skipped
