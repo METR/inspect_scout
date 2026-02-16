@@ -151,7 +151,11 @@ def llm_scanner(
             )
             # if we failed to extract then return value=None
             if value is None:
-                return Result(value=None, answer=model_output.completion)
+                return Result(
+                    value=None,
+                    answer=model_output.completion,
+                    metadata={"stop_reason": model_output.stop_reason},
+                )
 
         # otherwise do a normal generate
         else:
@@ -165,9 +169,14 @@ def llm_scanner(
             )
 
         # resolve answer
-        return resolved_answer.result_for_answer(
+        result = resolved_answer.result_for_answer(
             model_output, extract_references, value_to_float
         )
+        result.metadata = {
+            **(result.metadata or {}),
+            "stop_reason": model_output.stop_reason,
+        }
+        return result
 
     # set name for collection by @scanner if specified
     if name is not None:
