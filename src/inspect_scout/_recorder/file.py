@@ -1,4 +1,5 @@
 import io
+import logging
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Callable, Literal, Sequence, cast
 
@@ -93,6 +94,7 @@ class FileRecorder(ScanRecorder):
     def __init__(self) -> None:
         self._scan_dir: UPath | None = None
         self._scan_spec: ScanSpec | None = None
+        self._completed_from_results: set[tuple[str, str]] = set()
 
     @override
     async def init(self, spec: ScanSpec, scans_location: str) -> None:
@@ -117,7 +119,49 @@ class FileRecorder(ScanRecorder):
         self._scan_fs = filesystem(self._scan_dir.as_posix())
         self._scan_spec = _read_scan_spec(self._scan_dir)
         self._scan_buffer = RecorderBuffer(self._scan_dir.as_posix(), self.scan_spec)
+        self._build_completed_index()
         return self._scan_spec
+
+    def _build_completed_index(self) -> None:
+        """Build an in-memory index of successful results from existing parquet files.
+
+        When resuming on a new machine (e.g. a new Kubernetes pod), the local
+        buffer is empty even though compacted results exist in the scan
+        directory (which may be on S3). This reads just the transcript_id and
+        scan_error columns from each per-scanner parquet file to build a set
+        of (transcript_id, scanner) pairs that completed without error, so
+        is_recorded() can skip them.
+        """
+        logger = logging.getLogger(__name__)
+        completed: set[tuple[str, str]] = set()
+
+        for parquet_file in self.scan_dir.glob("*.parquet"):
+            scanner_name = parquet_file.stem
+
+            with file(parquet_file.as_posix(), "rb") as f:
+                table = pq.read_table(
+                    io.BytesIO(f.read()),
+                    columns=["transcript_id", "scan_error"],
+                )
+
+            if len(table) == 0:
+                continue
+
+            transcript_ids = table.column("transcript_id")
+            scan_errors = table.column("scan_error")
+
+            for i in range(len(table)):
+                tid = transcript_ids[i].as_py()
+                err = scan_errors[i].as_py()
+                if err is None:
+                    completed.add((tid, scanner_name))
+
+            logger.info(
+                f"Indexed existing results for resume: {scanner_name} "
+                f"({len(table)} rows)"
+            )
+
+        self._completed_from_results = completed
 
     @override
     async def location(self) -> str:
@@ -125,7 +169,9 @@ class FileRecorder(ScanRecorder):
 
     @override
     async def is_recorded(self, transcript_id: str, scanner: str) -> bool:
-        return await self._scan_buffer.is_recorded(transcript_id, scanner)
+        if await self._scan_buffer.is_recorded(transcript_id, scanner):
+            return True
+        return (transcript_id, scanner) in self._completed_from_results
 
     @override
     async def record(
