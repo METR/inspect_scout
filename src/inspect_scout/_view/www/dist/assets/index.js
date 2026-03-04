@@ -39631,6 +39631,7 @@ const kScanIdPattern = /scan_id=[a-zA-Z0-9_.-]{22}$/;
 const kScannerQueryParam = "scanner";
 const kValidationQueryParam = "validation";
 const kValidationSetQueryParam = "validationSet";
+const kDataframeColumnsQueryParam = "cols";
 const scanRoute = (scansDir, relativePath, searchParams) => {
   const encodedDir = encodeBase64Url(scansDir);
   const route = `/scan/${encodedDir}/${relativePath}`;
@@ -39749,6 +39750,21 @@ const updateValidationSetParam = (searchParams, uri) => {
     newParams.set(kValidationSetQueryParam, encodeBase64Url(uri));
   } else {
     newParams.delete(kValidationSetQueryParam);
+  }
+  return newParams;
+};
+const getColumnsParam = (searchParams) => {
+  const raw = searchParams.get(kDataframeColumnsQueryParam);
+  if (!raw) return void 0;
+  const columns2 = raw.split(",").filter(Boolean);
+  return columns2.length > 0 ? columns2 : void 0;
+};
+const updateColumnsParam = (searchParams, columns2) => {
+  const newParams = new URLSearchParams(searchParams);
+  if (columns2 && columns2.length > 0) {
+    newParams.set(kDataframeColumnsQueryParam, columns2.join(","));
+  } else {
+    newParams.delete(kDataframeColumnsQueryParam);
   }
   return newParams;
 };
@@ -122198,7 +122214,7 @@ const r_emphasis = {
   tokenize: emphasis_tokenize,
   postProcess: emphasis_post_process
 };
-function link$1(state, silent) {
+function link$2(state, silent) {
   let code2, label2, res, ref2;
   let href = "";
   let title2 = "";
@@ -122638,7 +122654,7 @@ const _rules = [
   ["backticks", backtick],
   ["strikethrough", r_strikethrough.tokenize],
   ["emphasis", r_emphasis.tokenize],
-  ["link", link$1],
+  ["link", link$2],
   ["image", image$1],
   ["autolink", autolink],
   ["html_inline", html_inline],
@@ -126360,6 +126376,20 @@ const ScannerDataframeClearFiltersButton = () => {
     }
   );
 };
+const useUserSettings = create$2()(
+  persist(
+    (set3) => ({
+      dataframeColumnPresets: [],
+      setDataframeColumnPresets: (presets) => {
+        set3({ dataframeColumnPresets: presets });
+      }
+    }),
+    {
+      name: "inspect-scout-user-settings",
+      storage: createJSONStorage(() => localStorage)
+    }
+  )
+);
 const defaultColumns = [
   "transcript_id",
   "value",
@@ -126379,15 +126409,33 @@ const defaultColumns = [
   "scan_events",
   "timestamp"
 ];
-const grid$2 = "_grid_hbkjn_1";
-const row$3 = "_row_hbkjn_8";
-const links$1 = "_links_hbkjn_22";
-const selected$4 = "_selected_hbkjn_40";
+const grid$2 = "_grid_j1jht_1";
+const row$3 = "_row_j1jht_8";
+const links$1 = "_links_j1jht_22";
+const link$1 = "_link_j1jht_22";
+const selected$4 = "_selected_j1jht_43";
+const presetItem = "_presetItem_j1jht_47";
+const presetLabel = "_presetLabel_j1jht_52";
+const presetDelete = "_presetDelete_j1jht_62";
+const presetSaveRow = "_presetSaveRow_j1jht_84";
+const presetInput = "_presetInput_j1jht_90";
+const saveButton = "_saveButton_j1jht_105";
+const cancelButton = "_cancelButton_j1jht_117";
+const saveLink = "_saveLink_j1jht_121";
 const styles$10 = {
   grid: grid$2,
   row: row$3,
   links: links$1,
-  selected: selected$4
+  link: link$1,
+  selected: selected$4,
+  presetItem,
+  presetLabel,
+  presetDelete,
+  presetSaveRow,
+  presetInput,
+  saveButton,
+  cancelButton,
+  saveLink
 };
 const columnsGroups = {
   Transcript: [
@@ -126437,7 +126485,7 @@ const columnsGroups = {
     "label",
     "value_type",
     "answer",
-    "scan_tokens_total",
+    "scan_total_tokens",
     "scan_model_usage",
     "scan_events",
     "timestamp",
@@ -126526,6 +126574,164 @@ const useDataframeColumns = () => {
     arrangedColumns
   };
 };
+const useColumnsUrlSync = (filtered, isDefault) => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const setFilteredColumns = useStore(
+    (state) => state.setDataframeFilterColumns
+  );
+  const initializedRef = reactExports.useRef(false);
+  const skipFirstSyncRef = reactExports.useRef(true);
+  reactExports.useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    const urlColumns = getColumnsParam(searchParams);
+    if (urlColumns) {
+      setFilteredColumns(urlColumns);
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    if (skipFirstSyncRef.current) {
+      skipFirstSyncRef.current = false;
+      return;
+    }
+    setSearchParams(
+      (prev) => updateColumnsParam(prev, isDefault ? void 0 : filtered),
+      { replace: true }
+    );
+  }, [filtered, isDefault, setSearchParams]);
+};
+const columnsMatch = (a2, b2) => a2.length === b2.length && [...a2].sort().join(",") === [...b2].sort().join(",");
+const MAX_PRESET_NAME_LENGTH = 20;
+const InlinePresets = ({ filtered, presets, setPresets }) => {
+  const setFilteredColumns = useStore(
+    (state) => state.setDataframeFilterColumns
+  );
+  const [isSaving, setIsSaving] = reactExports.useState(false);
+  const [presetName, setPresetName] = reactExports.useState("");
+  const [saveError, setSaveError] = reactExports.useState("");
+  const inputRef = reactExports.useRef(null);
+  reactExports.useEffect(() => {
+    if (isSaving && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isSaving]);
+  const matchingColumnPreset = presets.find(
+    (p2) => columnsMatch(p2.columns, filtered)
+  );
+  const isDefault = columnsMatch(filtered, defaultColumns);
+  const isAll = columnsMatch(filtered, Object.values(columnsGroups).flat());
+  const isExistingPreset = !!matchingColumnPreset || isDefault || isAll;
+  const handleSave = () => {
+    const name2 = presetName.trim().slice(0, MAX_PRESET_NAME_LENGTH);
+    if (!name2) return;
+    if (presets.some((p2) => p2.name === name2)) {
+      setSaveError(`"${name2}" already exists`);
+      return;
+    }
+    const existing = presets.find((p2) => columnsMatch(p2.columns, filtered));
+    if (existing) {
+      setSaveError(`Already saved as "${existing.name}"`);
+      return;
+    }
+    const newPreset = { name: name2, columns: [...filtered] };
+    setPresets([...presets, newPreset]);
+    setPresetName("");
+    setSaveError("");
+    setIsSaving(false);
+  };
+  const handleDelete = (index, e3) => {
+    e3.stopPropagation();
+    setPresets(presets.filter((_2, i4) => i4 !== index));
+  };
+  const handleLoad = (preset) => {
+    setFilteredColumns(preset.columns);
+  };
+  const startSaving = () => {
+    setSaveError("");
+    setIsSaving(true);
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    presets.map((preset, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs(reactExports.Fragment, { children: [
+      " | ",
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: styles$10.presetItem, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "a",
+          {
+            className: clsx(
+              styles$10.link,
+              matchingColumnPreset?.name === preset.name ? styles$10.selected : void 0
+            ),
+            onClick: () => handleLoad(preset),
+            title: `Load "${preset.name}" (${preset.columns.length} columns)`,
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: styles$10.presetLabel, children: preset.name })
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            className: styles$10.presetDelete,
+            onClick: (e3) => handleDelete(index, e3),
+            title: `Delete "${preset.name}"`,
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx("i", { className: "bi bi-x-circle" })
+          }
+        )
+      ] })
+    ] }, index)),
+    isSaving && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      " | ",
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: styles$10.presetSaveRow, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            ref: inputRef,
+            className: styles$10.presetInput,
+            type: "text",
+            placeholder: "Preset name",
+            maxLength: MAX_PRESET_NAME_LENGTH,
+            value: presetName,
+            onChange: (e3) => {
+              setPresetName(e3.target.value);
+              setSaveError("");
+            },
+            onKeyDown: (e3) => {
+              if (e3.key === "Enter") handleSave();
+              if (e3.key === "Escape") {
+                setIsSaving(false);
+                setPresetName("");
+                setSaveError("");
+              }
+            }
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: styles$10.saveButton, onClick: handleSave, children: "Save" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "a",
+          {
+            className: clsx(styles$10.link, styles$10.cancelButton),
+            onClick: () => {
+              setIsSaving(false);
+              setPresetName("");
+              setSaveError("");
+            },
+            children: "Cancel"
+          }
+        ),
+        saveError && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { color: "var(--bs-danger, #dc3545)" }, children: saveError })
+      ] })
+    ] }),
+    !isSaving && !isExistingPreset && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      " | ",
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          className: clsx(styles$10.saveLink, "text-size-small"),
+          onClick: startSaving,
+          children: "Save current..."
+        }
+      )
+    ] })
+  ] });
+};
 const ScannerDataframeColumnsPopover = ({ positionEl }) => {
   const showFilter = useStore((state) => state.dataframeShowFilterColumns);
   const setShowFilter = useStore(
@@ -126540,6 +126746,9 @@ const ScannerDataframeColumnsPopover = ({ positionEl }) => {
     filtered,
     arrangedColumns
   } = useDataframeColumns();
+  useColumnsUrlSync(filtered, isDefaultFilter);
+  const presets = useUserSettings((s4) => s4.dataframeColumnPresets);
+  const setPresets = useUserSettings((s4) => s4.setDataframeColumnPresets);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     PopOver,
     {
@@ -126549,6 +126758,7 @@ const ScannerDataframeColumnsPopover = ({ positionEl }) => {
       setIsOpen: setShowFilter,
       placement: "bottom-end",
       hoverDelay: -1,
+      styles: { maxWidth: "600px" },
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: clsx(styles$10.links, "text-size-smaller"), children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -126572,6 +126782,14 @@ const ScannerDataframeColumnsPopover = ({ positionEl }) => {
               ),
               onClick: () => setAllFilter(),
               children: "All"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            InlinePresets,
+            {
+              filtered,
+              presets,
+              setPresets
             }
           )
         ] }),
@@ -126618,11 +126836,6 @@ const ScannerDataframeColumnsPopover = ({ positionEl }) => {
   );
 };
 const FEEDBACK_DURATION_MS = 2e3;
-const sanitizeFilename = (name2, fallback = "scan") => {
-  const sanitized = name2.replace(/[/\\<>:"|?*]/g, "_");
-  return sanitized || fallback;
-};
-const getFileTimestamp = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:-]/g, "");
 const useOperationStatus = () => {
   const [status, setStatus] = reactExports.useState("idle");
   const timeoutRef = reactExports.useRef(null);
@@ -126653,6 +126866,11 @@ const useOperationStatus = () => {
   }, []);
   return [status, setTransientStatus];
 };
+const sanitizeFilename = (name2, fallback = "scan") => {
+  const sanitized = name2.replace(/[/\\<>:"|?*]/g, "_");
+  return sanitized || fallback;
+};
+const getFileTimestamp = () => (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:-]/g, "");
 const ScannerDataframeCopyCSVButton = () => {
   const gridApi = useDataframeGridApi();
   const visibleColumns = useStore((state) => state.dataframeFilterColumns);
@@ -166656,7 +166874,14 @@ const ScanPanelBody = ({
   }, [searchParams, setSelectedResultsTab]);
   const handleTabChange = (tabId) => {
     setSelectedResultsTab(tabId);
-    setSearchParams({ tab: tabId });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("tab", tabId);
+        return next;
+      },
+      { replace: true }
+    );
   };
   const selectedResultsView = useStore((state) => state.selectedResultsView) || kSegmentList;
   const setSelectedResultsView = useStore(
