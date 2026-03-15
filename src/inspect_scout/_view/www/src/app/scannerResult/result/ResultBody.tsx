@@ -8,12 +8,12 @@ import { NoContentsPanel } from "../../../components/NoContentsPanel";
 import { TranscriptView } from "../../../components/transcript/TranscriptView";
 import { transcriptRoute } from "../../../router/url";
 import { useStore } from "../../../state/store";
+import { ScannerInput } from "../../../types/api-types";
 import {
   ColumnHeader,
   ColumnHeaderButton,
 } from "../../components/ColumnHeader";
 import {
-  ScanResultInputData,
   isEventInput,
   isEventsInput,
   isMessageInput,
@@ -26,7 +26,7 @@ import styles from "./ResultBody.module.css";
 
 export interface ResultBodyProps {
   resultData: ScanResultData;
-  inputData: ScanResultInputData;
+  inputData: ScannerInput;
   transcriptDir: string;
   hasTranscript: boolean;
 }
@@ -84,12 +84,24 @@ export const ResultBody: FC<ResultBodyProps> = ({
 interface InputRendererProps {
   className?: string | string[];
   resultData?: ScanResultData;
-  inputData: ScanResultInputData;
-  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  inputData: ScannerInput;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
   initialMessageId?: string | null;
   initialEventId?: string | null;
   highlightLabeled?: boolean;
 }
+
+const containerClass = (
+  inputData: ScannerInput
+): string | string[] | undefined => {
+  if (isTranscriptInput(inputData)) {
+    return styles.transcriptInputContainer;
+  } else if (isEventsInput(inputData)) {
+    return styles.eventsInputContainer;
+  } else {
+    return styles.chatInputContainer;
+  }
+};
 
 const InputRenderer: FC<InputRendererProps> = ({
   resultData,

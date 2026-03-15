@@ -17,7 +17,9 @@ import pyarrow.parquet as pq
 from inspect_ai._util.asyncfiles import AsyncFilesystem
 from inspect_ai._util.error import PrerequisiteError
 from inspect_ai._util.file import filesystem
+from inspect_ai._util.json import to_json_str_safe
 from inspect_ai._util.path import pretty_path
+from inspect_ai.log import condense_events, expand_events
 from inspect_ai.util import trace_action, trace_message
 from typing_extensions import override
 from upath import UPath
@@ -68,6 +70,24 @@ logger = getLogger(__name__)
 
 PARQUET_TRANSCRIPTS_GLOB = "*.parquet"
 CHUNK_SIZE = 64 * 1024  # 64KB chunks for streaming
+
+
+def _resolve_events_json(
+    events_json: str,
+    events_data_json: str | None,
+) -> str:
+    """Resolve pool refs in events JSON, returning re-serialized JSON string.
+
+    The JSON→Pydantic→JSON round-trip here is tortured: we deserialize to models
+    only because the resolve functions need typed Events, then immediately
+    re-serialize. See #334 for a broader discussion of unnecessary JSON
+    round-trips in the parquet read path.
+    """
+    if not events_data_json:
+        return events_json
+
+    events = expand_events(events_json, events_data_json)
+    return json.dumps([e.model_dump() for e in events])
 
 
 class _ParquetStreamContextManager:
@@ -718,6 +738,27 @@ class ParquetTranscriptsDB(TranscriptsDB):
                 content.events,
             )
 
+            # Resolve pool references back to full messages/calls
+            if events_data_json:
+                resolved_events = expand_events(transcript.events, events_data_json)
+                transcript = transcript.model_copy(update={"events": resolved_events})
+
+            # Fallback: if timelines were requested but not stored, build from events
+            if (
+                content.timeline is not None
+                and not transcript.timelines
+                and transcript.events
+            ):
+                from inspect_ai.event import timeline_build
+
+                from ...util import filter_timelines
+
+                raw_timeline = timeline_build(transcript.events)
+                timelines = filter_timelines([raw_timeline], content.timeline)
+                transcript = transcript.model_copy(update={"timelines": timelines})
+
+            return transcript
+
     @override
     async def read_messages_events(
         self, t: TranscriptInfo
@@ -872,7 +913,16 @@ class ParquetTranscriptsDB(TranscriptsDB):
 
         # Serialize messages and events as JSON arrays
         messages_array = [msg.model_dump() for msg in transcript.messages]
-        events_array = [event.model_dump() for event in transcript.events]
+
+        if pool_dedup:
+            condensed_events, events_data = condense_events(transcript.events)
+            events_json = to_json_str_safe(condensed_events)
+            events_data_json = to_json_str_safe(events_data)
+        else:
+            events_json = json.dumps(
+                [event.model_dump() for event in transcript.events]
+            )
+            events_data_json = None
 
         # Start with reserved fields
         row: dict[str, Any] = {
