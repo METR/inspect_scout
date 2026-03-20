@@ -22,6 +22,7 @@ from inspect_scout._transcript.types import (
     Transcript,
     TranscriptContent,
     TranscriptInfo,
+    TranscriptMessagesAndEvents,
 )
 from pydantic import JsonValue
 

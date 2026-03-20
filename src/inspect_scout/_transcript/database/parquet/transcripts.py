@@ -48,7 +48,7 @@ from ...types import (
 )
 from ..database import TranscriptsDB
 from ..reader import TranscriptsViewReader
-from ..schema import TRANSCRIPT_SCHEMA_FIELDS, reserved_columns
+from ..schema import CONTENT_COLUMNS, TRANSCRIPT_SCHEMA_FIELDS, reserved_columns
 from .encryption import (
     ENCRYPTION_KEY_ENV,
     ENCRYPTION_KEY_NAME,
@@ -66,7 +66,6 @@ from .migration import migrate_view
 from .types import IndexStorage
 
 logger = getLogger(__name__)
-
 
 PARQUET_TRANSCRIPTS_GLOB = "*.parquet"
 CHUNK_SIZE = 64 * 1024  # 64KB chunks for streaming
@@ -707,6 +706,8 @@ class ParquetTranscriptsDB(TranscriptsDB):
             # Extract column values based on which columns were actually read
             messages_json: str | None = None
             events_json: str | None = None
+            timelines_json: str | None = None
+            events_data_json: str | None = None
 
             col_idx = 0
             if "messages" in columns_read:
@@ -714,6 +715,13 @@ class ParquetTranscriptsDB(TranscriptsDB):
                 col_idx += 1
             if "events" in columns_read:
                 events_json = result[col_idx]
+                col_idx += 1
+            if "timelines" in columns_read:
+                timelines_json = result[col_idx]
+                col_idx += 1
+            if "events_data" in columns_read:
+                events_data_json = result[col_idx]
+                col_idx += 1
 
             # Stream combined JSON construction
             async def stream_content_bytes() -> AsyncIterator[bytes]:
@@ -736,10 +744,16 @@ class ParquetTranscriptsDB(TranscriptsDB):
                 else:
                     yield b"[]"
 
+                if timelines_json:
+                    yield b', "timelines": '
+                    timelines_bytes = timelines_json.encode("utf-8")
+                    for i in range(0, len(timelines_bytes), chunk_size):
+                        yield timelines_bytes[i : i + chunk_size]
+
                 yield b"}"
 
             # Use existing streaming JSON parser with filtering
-            return await load_filtered_transcript(
+            transcript = await load_filtered_transcript(
                 stream_content_bytes(),
                 t,
                 content.messages,
@@ -907,11 +921,14 @@ class ParquetTranscriptsDB(TranscriptsDB):
             if accumulated_batches:
                 await self._write_arrow_batch(accumulated_batches, session_id)
 
-    def _transcript_to_row(self, transcript: Transcript) -> dict[str, Any]:
+    def _transcript_to_row(
+        self, transcript: Transcript, *, pool_dedup: bool = True
+    ) -> dict[str, Any]:
         """Convert Transcript to Parquet row dict with flattened metadata.
 
         Args:
             transcript: Transcript to convert.
+            pool_dedup: Condense repeated messages/calls into pools.
 
         Returns:
             Dict with Parquet column values.
@@ -919,7 +936,7 @@ class ParquetTranscriptsDB(TranscriptsDB):
         # Validate metadata keys don't conflict with reserved names
         _validate_metadata_keys(transcript.metadata)
 
-        # Serialize messages and events as JSON arrays
+        # Serialize messages as JSON array
         messages_array = [msg.model_dump() for msg in transcript.messages]
 
         if pool_dedup:
@@ -962,7 +979,8 @@ class ParquetTranscriptsDB(TranscriptsDB):
             "error": transcript.error,
             "limit": transcript.limit,
             "messages": json.dumps(messages_array),
-            "events": json.dumps(events_array),
+            "events": events_json,
+            "events_data": events_data_json,
         }
 
         # Flatten metadata: add each key as a column
@@ -1000,7 +1018,7 @@ class ParquetTranscriptsDB(TranscriptsDB):
             if value is None:
                 continue  # NULL values have minimal overhead
             elif isinstance(value, str):
-                if key in ("messages", "events"):
+                if key in CONTENT_COLUMNS:
                     json_array_size += len(value)
                 else:
                     other_size += len(value)
@@ -1030,7 +1048,7 @@ class ParquetTranscriptsDB(TranscriptsDB):
 
         for i, name in enumerate(batch.schema.names):
             col_size = batch.column(i).nbytes
-            if name in ("messages", "events"):
+            if name in CONTENT_COLUMNS:
                 json_array_size += col_size
             else:
                 other_size += col_size
@@ -1067,8 +1085,10 @@ class ParquetTranscriptsDB(TranscriptsDB):
             col_type = schema.field(field.name).type
             expected_type = field.pyarrow_type
 
-            # String columns: allow large_string as equivalent
-            if expected_type == pa.string():
+            # String columns: allow both string and large_string (backward compat)
+            if pa.types.is_string(expected_type) or pa.types.is_large_string(
+                expected_type
+            ):
                 if col_type not in (pa.string(), pa.large_string()):
                     raise ValueError(
                         f"'{field.name}' column must be string type, got {col_type}"

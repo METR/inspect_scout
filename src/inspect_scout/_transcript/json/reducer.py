@@ -12,6 +12,9 @@ ATTACHMENT_PREFIX_LEN = len(ATTACHMENT_PREFIX)
 ATTACHMENTS_PREFIX = "attachments."
 MESSAGES_ITEM_PREFIX = "messages.item"
 EVENTS_ITEM_PREFIX = "events.item"
+TIMELINES_ITEM_PREFIX = "timelines.item"
+MESSAGE_POOL_ITEM_PREFIX = "message_pool.item"
+CALL_POOL_ITEM_PREFIX = "call_pool.item"
 METADATA_PREFIX = "metadata."
 
 
@@ -45,6 +48,10 @@ class ParseState:
     attachment_refs: set[str] = field(default_factory=set)
     attachments: dict[str, str] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    target: str | list[str] | None = None
+    scores: dict[str, Any] = field(default_factory=dict)
+    message_pool: list[dict[str, Any]] = field(default_factory=list)
+    call_pool: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +131,57 @@ def event_item_coroutine(
 
 
 @_ijson_coroutine  # type: ignore
+def _unfiltered_item_coroutine(
+    target_list: list[dict[str, Any]],
+    item_prefix: str,
+) -> CoroutineGen:  # pragma: no cover
+    """Collect items from the JSON stream without filtering."""
+    builder: ObjectBuilder | None = None
+    while True:
+        prefix, event, value = yield
+        if prefix == item_prefix and event == "start_map":
+            builder = ObjectBuilder()
+            builder.event(event, value)
+            continue
+        if builder is None:
+            continue
+        if prefix == item_prefix and event == "end_map":
+            try:
+                builder.event(event, value)
+                target_list.append(builder.value)
+            except Exception:
+                pass
+            builder = None
+            continue
+        try:
+            builder.event(event, value)
+        except Exception:
+            builder = None
+            continue
+
+
+def timeline_item_coroutine(state: ParseState) -> CoroutineGen:
+    return cast(
+        CoroutineGen,
+        _unfiltered_item_coroutine(state.timelines, TIMELINES_ITEM_PREFIX),
+    )
+
+
+def message_pool_item_coroutine(state: ParseState) -> CoroutineGen:
+    return cast(
+        CoroutineGen,
+        _unfiltered_item_coroutine(state.message_pool, MESSAGE_POOL_ITEM_PREFIX),
+    )
+
+
+def call_pool_item_coroutine(state: ParseState) -> CoroutineGen:
+    return cast(
+        CoroutineGen,
+        _unfiltered_item_coroutine(state.call_pool, CALL_POOL_ITEM_PREFIX),
+    )
+
+
+@_ijson_coroutine  # type: ignore
 def attachments_coroutine(state: ParseState) -> CoroutineGen:  # pragma: no cover
     attachments_prefix_len = len(ATTACHMENTS_PREFIX)
     while True:
@@ -177,6 +235,9 @@ __all__ = [
     "ParseState",
     "message_item_coroutine",
     "event_item_coroutine",
+    "timeline_item_coroutine",
+    "message_pool_item_coroutine",
+    "call_pool_item_coroutine",
     "attachments_coroutine",
     "metadata_coroutine",
     "ATTACHMENT_PREFIX",
@@ -184,5 +245,8 @@ __all__ = [
     "ATTACHMENTS_PREFIX",
     "MESSAGES_ITEM_PREFIX",
     "EVENTS_ITEM_PREFIX",
+    "TIMELINES_ITEM_PREFIX",
+    "MESSAGE_POOL_ITEM_PREFIX",
+    "CALL_POOL_ITEM_PREFIX",
     "METADATA_PREFIX",
 ]
