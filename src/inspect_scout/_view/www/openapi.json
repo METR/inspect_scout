@@ -2305,7 +2305,8 @@
         ]
       },
       "EventsData": {
-        "description": "Pooled data extracted by :func:`condense_events`.",
+        "additionalProperties": true,
+        "description": "Pooled data extracted by condense_events / condense_sample.",
         "properties": {
           "calls": {
             "items": {
@@ -4734,6 +4735,16 @@
             },
             "title": "Events",
             "type": "array"
+          },
+          "events_data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventsData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "messages": {
             "items": {

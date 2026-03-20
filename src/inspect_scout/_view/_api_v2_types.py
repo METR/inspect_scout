@@ -283,6 +283,7 @@ class MessagesEventsResponse(BaseModel):
     messages: list[ChatMessage]
     events: list[Event]
     attachments: dict[str, str] | None = None
+    events_data: EventsData | None = None
 
     model_config = ConfigDict(extra="allow")
 
