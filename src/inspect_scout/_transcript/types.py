@@ -70,6 +70,7 @@ LogPaths: TypeAlias = (
 class TranscriptContent:
     messages: MessageFilter = field(default=None)
     events: EventFilter = field(default=None)
+    timeline: Literal[None] = field(default=None)  # placeholder
 
 
 class BytesContextManager:
