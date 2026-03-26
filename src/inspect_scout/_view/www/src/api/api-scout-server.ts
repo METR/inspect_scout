@@ -1,6 +1,7 @@
 import { decompress as decompressZstd } from "fzstd";
 
 import { ScanResultInputData, Input, InputType } from "../app/types";
+import { Event } from "../types/api-types";
 import type { Condition, OrderByModel } from "../query";
 import {
   ActiveScansResponse,
@@ -24,7 +25,13 @@ import {
 import { encodeBase64Url } from "../utils/base64url";
 import { asyncJsonParse } from "../utils/json-worker";
 
-import { NoPersistence, ScoutApiV2, ScalarValue, TopicVersions } from "./api";
+import {
+  NoPersistence,
+  ScanResultDetail,
+  ScoutApiV2,
+  ScalarValue,
+  TopicVersions,
+} from "./api";
 import { resolveAttachments } from "./attachmentsHelpers";
 import { serverRequestApi } from "./request";
 
@@ -261,6 +268,45 @@ export const apiScoutServer = (
 
       // Return the DataFrameInput
       return { input, inputType: inputType as InputType };
+    },
+    getScannerDataframeDetail: async (
+      scansDir: string,
+      scanPath: string,
+      scanner: string,
+      uuid: string
+    ): Promise<ScanResultDetail> => {
+      const raw = await asyncJsonParse<{
+        input_type: string;
+        input: unknown;
+        scan_events: unknown;
+      }>(
+        (
+          await requestApi.fetchString(
+            "GET",
+            `/scans/${encodeBase64Url(scansDir)}/${encodeBase64Url(scanPath)}/${encodeURIComponent(scanner)}/${encodeURIComponent(uuid)}/fields?fields=input,input_type,scan_events`
+          )
+        ).raw
+      );
+
+      const scanEvents = await asyncJsonParse<Event[]>(
+        typeof raw.scan_events === "string"
+          ? raw.scan_events
+          : JSON.stringify(raw.scan_events ?? [])
+      );
+
+      const input = await asyncJsonParse<Input>(
+        typeof raw.input === "string"
+          ? raw.input
+          : JSON.stringify(raw.input ?? null)
+      );
+
+      return {
+        input: {
+          input: input,
+          inputType: raw.input_type as InputType,
+        },
+        scanEvents: scanEvents ?? [],
+      };
     },
     getActiveScans: async (): Promise<ActiveScansResponse> =>
       asyncJsonParse<ActiveScansResponse>(

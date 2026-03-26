@@ -3,30 +3,30 @@ import { skipToken } from "@tanstack/react-query";
 import { useApi } from "../../state/store";
 import { AsyncData } from "../../utils/asyncData";
 import { useAsyncDataFromQuery } from "../../utils/asyncDataFromQuery";
-import { ScanResultInputData } from "../types";
+import { ScanResultDetail } from "../../api/api";
 
-type ScanDataframeInputParams = {
+type ScanDataframeDetailParams = {
   scansDir: string;
   scanPath: string;
   scanner: string;
   uuid: string;
 };
 
-export const useScanDataframeInput = (
-  params: ScanDataframeInputParams | typeof skipToken
-): AsyncData<ScanResultInputData> => {
+export const useScanDataframeDetail = (
+  params: ScanDataframeDetailParams | typeof skipToken
+): AsyncData<ScanResultDetail> => {
   const api = useApi();
 
   return useAsyncDataFromQuery({
     queryKey:
       params === skipToken
         ? [skipToken]
-        : ["scanDataframeInput", params, "scans-inv"],
+        : ["scanDataframeDetail", params, "scans-inv"],
     queryFn:
       params === skipToken
         ? skipToken
         : () =>
-            api.getScannerDataframeInput(
+            api.getScannerDataframeDetail(
               params.scansDir,
               params.scanPath,
               params.scanner,

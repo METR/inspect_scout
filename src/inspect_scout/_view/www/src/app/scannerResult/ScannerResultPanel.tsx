@@ -22,7 +22,7 @@ import { ScansNavbar } from "../components/ScansNavbar";
 import { useScanRoute } from "../hooks/useScanRoute";
 import { useSelectedScan } from "../hooks/useSelectedScan";
 import { useSelectedScanResultData } from "../hooks/useSelectedScanResultData";
-import { useSelectedScanResultInputData } from "../hooks/useSelectedScanResultInputData";
+import { useSelectedScanResultDetail } from "../hooks/useSelectedScanResultDetail";
 import { useAppConfig } from "../server/useAppConfig";
 import { useHasTranscript } from "../server/useHasTranscript";
 import { isTranscriptInput, ScanResultData } from "../types";
@@ -104,8 +104,11 @@ export const ScannerResultPanel: FC = () => {
   const { data: selectedResult, loading: resultLoading } =
     useSelectedScanResultData(scanResultUuid);
 
-  const { loading: inputLoading, data: inputData } =
-    useSelectedScanResultInputData(selectedResult?.uuid);
+  const { loading: detailLoading, data: detailData } =
+    useSelectedScanResultDetail(selectedResult?.uuid);
+
+  const inputData = detailData?.input;
+  const detailScanEvents = detailData?.scanEvents;
 
   // Set document title with task name and scan location
   const taskName =
@@ -155,16 +158,16 @@ export const ScannerResultPanel: FC = () => {
   // However, this useMemo feels like a premature optimization. I think it should go
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const showEvents = useMemo(() => {
-    if (!selectedResult?.scanEvents) {
+    if (!detailScanEvents || detailScanEvents.length === 0) {
       return false;
     }
 
-    const hasNonSpanEvents = selectedResult.scanEvents.some((event) => {
+    const hasNonSpanEvents = detailScanEvents.some((event) => {
       return event.event !== "span_begin" && event.event !== "span_end";
     });
 
     return hasNonSpanEvents;
-  }, [selectedResult?.scanEvents]);
+  }, [detailScanEvents]);
 
   const hasError =
     selectedResult?.scanError !== undefined &&
@@ -283,7 +286,7 @@ export const ScannerResultPanel: FC = () => {
         >
           <TranscriptPanel
             id="scan-transcript"
-            resultData={resultData}
+            events={detailScanEvents ?? []}
             nodeFilter={skipScanSpan}
           />
         </TabPanel>
@@ -337,7 +340,7 @@ export const ScannerResultPanel: FC = () => {
       </ScansNavbar>
       <LoadingBar
         loading={
-          scanLoading || resultLoading || inputLoading || hasTranscriptLoading
+          scanLoading || resultLoading || detailLoading || hasTranscriptLoading
         }
       />
       <ScannerResultHeader

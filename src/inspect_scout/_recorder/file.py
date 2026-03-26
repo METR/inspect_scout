@@ -308,6 +308,44 @@ class FileRecorder(ScanRecorder):
 
                 return cast("Scalar[Any]", table[target_column][0])
 
+            def get_fields(
+                self,
+                scanner: str,
+                id_column: str,
+                id_value: Any,
+                target_columns: list[str],
+            ) -> dict[str, "Scalar[Any]"]:
+                scan_path = UPath(scan_location)
+                scanner_path = scan_path / f"{scanner}.parquet"
+                scanner_path_str = scanner_path.as_posix()
+
+                dataset: ds.Dataset
+                if scanner_path_str.startswith(("s3://", "gs://", "az://", "abfs://")):
+                    with file(scanner_path_str, "rb") as f:
+                        file_bytes = f.read()
+                    table = pq.read_table(io.BytesIO(file_bytes))
+                    dataset = ds.dataset(table)
+                else:
+                    dataset = ds.dataset(str(scanner_path), format="parquet")
+
+                table = dataset.to_table(
+                    columns=target_columns,
+                    filter=(pc.field(id_column) == id_value),
+                )
+
+                if len(table) == 0:
+                    raise KeyError(f"{id_value!r} not found in {id_column}")
+
+                if len(table) > 1:
+                    raise ValueError(
+                        f"Multiple rows found for {id_column}={id_value!r}"
+                    )
+
+                return {
+                    col: cast("Scalar[Any]", table[col][0])
+                    for col in target_columns
+                }
+
         # get the status
         status = await FileRecorder.status(scan_location)
 

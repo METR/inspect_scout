@@ -77,7 +77,7 @@ export interface ScanResultData extends ScanResultSummary {
   scanError?: string;
   scanErrorTraceback?: string;
   scanErrorRefusal?: boolean;
-  scanEvents: Event[];
+  scanEvents?: Event[];
   scanId: string;
   scanMetadata: Record<string, JsonValue>;
   scanModelUsage: Record<string, ModelUsage>;

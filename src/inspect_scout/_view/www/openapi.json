@@ -1661,7 +1661,8 @@
             "enum": [
               "auto",
               "low",
-              "high"
+              "high",
+              "original"
             ],
             "title": "Detail",
             "type": "string"
@@ -2525,6 +2526,29 @@
             "default": null,
             "title": "Max Tool Output"
           },
+          "modalities": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "const": "image",
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImageOutput"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Modalities"
+          },
           "num_choices": {
             "anyOf": [
               {
@@ -2965,6 +2989,28 @@
             ],
             "title": "Max Tool Output"
           },
+          "modalities": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "const": "image",
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImageOutput"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modalities"
+          },
           "num_choices": {
             "anyOf": [
               {
@@ -3388,6 +3434,28 @@
             ],
             "title": "Max Tool Output"
           },
+          "modalities": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "const": "image",
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ImageOutput"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modalities"
+          },
           "num_choices": {
             "anyOf": [
               {
@@ -3617,6 +3685,32 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImageOutput": {
+        "description": "Image output configuration.\n\nUse the `options` field to pass provider-specific options directly\nto the underlying API (e.g. OpenAI image_generation tool parameters).",
+        "properties": {
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "propertyNames": {
+                  "const": "openai"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Options"
+          }
+        },
+        "title": "ImageOutput",
         "type": "object"
       },
       "InfoEvent": {
@@ -4728,6 +4822,55 @@
       "ModelCall": {
         "description": "Model call (raw request/response data).",
         "properties": {
+          "call_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Call Key"
+          },
+          "call_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Call Refs"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          },
           "request": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -4922,6 +5065,31 @@
             },
             "title": "Input",
             "type": "array"
+          },
+          "input_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Input Refs"
           },
           "metadata": {
             "anyOf": [
@@ -8117,6 +8285,21 @@
             "default": null,
             "title": "Pending"
           },
+          "role_usage": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ModelUsage"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Role Usage"
+          },
           "score": {
             "$ref": "#/components/schemas/Score"
           },
@@ -9001,6 +9184,18 @@
             "default": null,
             "title": "Agent"
           },
+          "agent_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Agent Span Id"
+          },
           "arguments": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -9127,6 +9322,9 @@
                 "$ref": "#/components/schemas/ContentVideo"
               },
               {
+                "$ref": "#/components/schemas/ContentDocument"
+              },
+              {
                 "items": {
                   "anyOf": [
                     {
@@ -9140,6 +9338,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/ContentVideo"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ContentDocument"
                     }
                   ]
                 },
@@ -11050,8 +11251,93 @@
         ]
       }
     },
+    "/scans/{dir}/{scan}/{scanner}/{uuid}/fields": {
+      "get": {
+        "description": "Returns requested fields as a JSON object. Allowed fields: input, input_type, input_data, scan_events. Pass a comma-separated list via the `fields` query parameter.",
+        "operationId": "scanner_fields_scans__dir___scan___scanner___uuid__fields_get",
+        "parameters": [
+          {
+            "description": "Scans directory (base64url-encoded)",
+            "in": "path",
+            "name": "dir",
+            "required": true,
+            "schema": {
+              "description": "Scans directory (base64url-encoded)",
+              "title": "Dir",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scan path (base64url-encoded)",
+            "in": "path",
+            "name": "scan",
+            "required": true,
+            "schema": {
+              "description": "Scan path (base64url-encoded)",
+              "title": "Scan",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Scanner name",
+            "in": "path",
+            "name": "scanner",
+            "required": true,
+            "schema": {
+              "description": "Scanner name",
+              "title": "Scanner",
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID of the specific result row",
+            "in": "path",
+            "name": "uuid",
+            "required": true,
+            "schema": {
+              "description": "UUID of the specific result row",
+              "title": "Uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated list of field names to return",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated list of field names to return",
+              "title": "Fields"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get specific fields for a result row",
+        "tags": [
+          "scans"
+        ]
+      }
+    },
     "/scans/{dir}/{scan}/{scanner}/{uuid}/input": {
       "get": {
+        "deprecated": true,
         "description": "Returns the original input text for a specific scanner result. The input type is returned in the X-Input-Type response header.",
         "operationId": "scanner_input_scans__dir___scan___scanner___uuid__input_get",
         "parameters": [
