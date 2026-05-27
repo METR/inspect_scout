@@ -1,3 +1,20 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:d987b63bc157980b456773792f235c0b7072ffaaf7a4926790df6ab52c71f709
-size 2055
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inspect Scout</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/favicon-CLlGywfF.svg" />
+    <script>"use strict";(()=>{var l="inspect-scout-user-settings",d=e=>e==="system"||e==="light"||e==="dark",n=e=>{try{let t=e.getItem(l);if(!t)return"system";let r=JSON.parse(t);if(r&&typeof r=="object"&&"state"in r){let s=r.state;if(s&&typeof s=="object"&&"themePreference"in s){let a=s.themePreference;if(d(a))return a}}return"system"}catch{return"system"}},i=e=>e==="dark"||e==="vscode-dark",c=e=>{if(e.isVscodeWebview)return e.explicitParam?{kind:"apply",theme:e.explicitParam,isDark:i(e.explicitParam),toggleBodyClass:!1}:{kind:"skip"};let t;return e.preference!=="system"?t=e.preference:e.explicitParam?t=e.explicitParam:t=e.prefersDark?"dark":"light",{kind:"apply",theme:t,isDark:i(t),toggleBodyClass:!0}};var o=()=>{let e=new URLSearchParams(window.location.search),t=c({preference:n(localStorage),explicitParam:e.get("inspectViewThemeCategory"),isVscodeWebview:typeof window.acquireVsCodeApi=="function",prefersDark:window.matchMedia("(prefers-color-scheme: dark)").matches});t.kind!=="skip"&&(document.documentElement.setAttribute("data-text-highlight",t.theme),document.documentElement.setAttribute("data-bs-theme",t.isDark?"dark":"light"),t.toggleBodyClass&&document.body?.classList.toggle("vscode-dark",t.isDark))};window.__SCOUT_APPLY_BROWSER_THEME__=o;o();window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",o);})();</script>
+    <script type="module" crossorigin src="./assets/index-DmtArsgT.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/chunk-DfAF0w94-BLadHRKw.js">
+    <link rel="stylesheet" crossorigin href="./assets/index-C3K7225e.css">
+  </head>
+
+  <body style="min-width: 450px">
+    <script>
+      window.__SCOUT_APPLY_BROWSER_THEME__?.();
+    </script>
+    <div id="app"></div>
+  </body>
+</html>
