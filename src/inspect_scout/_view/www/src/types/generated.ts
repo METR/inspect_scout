@@ -2924,6 +2924,10 @@ export interface components {
             } | null;
             /** Worklist */
             worklist?: components["schemas"]["Worklist"][] | null;
+            /** Cohorts */
+            cohorts?: {
+                [key: string]: components["schemas"]["CohortMembership"][];
+            } | null;
         };
         /**
          * ScanTranscripts
@@ -2997,6 +3001,7 @@ export interface components {
              * @default 0
              */
             version: number;
+            cohort?: components["schemas"]["CohortSpec"] | null;
         };
         /**
          * ScannerSummary
@@ -4132,6 +4137,62 @@ export interface components {
             scanner: string;
             /** Transcripts */
             transcripts: string[];
+        };
+        /**
+         * CohortSpec
+         * @description Specification of how to group transcripts into cohorts for a cohort scanner.
+         *
+         *     A cohort scanner (declared via `@scanner(group_by=...)` with a
+         *     `Sequence[Transcript]` input) analyzes a group of related transcripts
+         *     together. The cohort is defined by holding one or more grouping dimensions
+         *     constant; transcripts that share the same values for those dimensions form a
+         *     cohort. Provide either `group_by` (explicit dimensions) or `preset` (a named
+         *     set of dimensions).
+         */
+        CohortSpec: {
+            /** Group By */
+            group_by?: ("task_set" | "task_id" | "task_repeat" | "model" | "agent" | "source_id")[] | null;
+            /** Max Members */
+            max_members?: number | null;
+            /**
+             * Min Size
+             * @default 2
+             */
+            min_size: number;
+            /** Preset */
+            preset?: ("same_task_across_models" | "same_task_in_sample" | "same_task_across_agents") | null;
+        };
+        /**
+         * CohortMembership
+         * @description A resolved cohort: the concrete set of transcripts in one group.
+         */
+        CohortMembership: {
+            /** Cohort Id */
+            cohort_id: string;
+            /** Key */
+            key: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Label */
+            label: string;
+            /** Max Members */
+            max_members?: number | null;
+            /** Members */
+            members: string[];
+            /** Members Digest */
+            members_digest: string;
+            /** Missing Members */
+            missing_members: string[];
+            /**
+             * Total Members
+             * @default 0
+             */
+            total_members: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
     };
     responses: never;

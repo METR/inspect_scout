@@ -1,7 +1,12 @@
 from inspect_ai._util.deprecation import relocated_module_attribute
 
 from ._grep_scanner import grep_scanner
-from ._llm_scanner import AnswerMultiLabel, AnswerStructured, llm_scanner
+from ._llm_scanner import (
+    AnswerMultiLabel,
+    AnswerStructured,
+    llm_cohort_scanner,
+    llm_scanner,
+)
 from ._observe import ObserveEmit, ObserveProvider, observe, observe_update
 from ._project import ProjectConfig
 from ._query.condition import Condition
@@ -19,11 +24,13 @@ from ._scan import (
 from ._scanjob import ScanJob, scanjob
 from ._scanjob_config import ScanJobConfig
 from ._scanlist import scan_list
+from ._scanner.cohort_input import Cohort, CohortMember, UpstreamResults
 from ._scanner.extract import (
     MessageFormatOptions,
     MessagesPreprocessor,
     messages_as_str,
     tool_callers,
+    transcripts_as_str,
 )
 from ._scanner.loader import Loader, loader
 from ._scanner.result import Error, Reference, Result
@@ -36,6 +43,9 @@ from ._scanresults import (
     scan_status,
 )
 from ._scanspec import (
+    CohortMembership,
+    CohortSpec,
+    GroupDim,
     ScannerSpec,
     ScanOptions,
     ScanRevision,
@@ -95,6 +105,9 @@ __all__ = [
     "scanjob",
     "ScanJob",
     "ScanJobConfig",
+    "CohortSpec",
+    "CohortMembership",
+    "GroupDim",
     "ProjectConfig",
     "scan_list",
     "scan_status",
@@ -124,6 +137,9 @@ __all__ = [
     "Error",
     "Scanner",
     "ScannerInput",
+    "Cohort",
+    "CohortMember",
+    "UpstreamResults",
     "Result",
     "Reference",
     "scanner",
@@ -133,11 +149,13 @@ __all__ = [
     "MessageType",
     "as_scorer",
     "messages_as_str",
+    "transcripts_as_str",
     "MessageFormatOptions",
     "MessagesPreprocessor",
     "tool_callers",
     "RefusalError",
     "llm_scanner",
+    "llm_cohort_scanner",
     "AnswerMultiLabel",
     "AnswerStructured",
     "grep_scanner",

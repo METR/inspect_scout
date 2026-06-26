@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from functools import reduce
-from typing import Awaitable, Callable, Generic, Literal, TypeVar, overload
+from typing import Awaitable, Callable, Generic, Literal, Sequence, TypeVar, overload
 
 from inspect_ai.model import (
     ChatMessage,
@@ -134,6 +134,96 @@ async def messages_as_str(
         if include_ids
         else result
     )
+
+
+def _default_transcript_header(index: int, transcript: Transcript) -> str:
+    """Header line introducing a cohort member transcript (e.g. its model/outcome)."""
+    parts = [f"transcript={transcript.transcript_id}"]
+    if transcript.model:
+        parts.append(f"model={transcript.model}")
+    if transcript.agent:
+        parts.append(f"agent={transcript.agent}")
+    if transcript.task_repeat is not None:
+        parts.append(f"epoch={transcript.task_repeat}")
+    if transcript.success is not None:
+        parts.append(f"success={transcript.success}")
+    elif transcript.score is not None:
+        parts.append(f"score={transcript.score}")
+    return f"=== Transcript T{index} ({', '.join(parts)}) ==="
+
+
+async def transcripts_as_str(
+    transcripts: Sequence[Transcript],
+    *,
+    preprocessor: MessagesPreprocessor[Transcript] | None = None,
+    header: Callable[[int, Transcript], str] | None = None,
+) -> tuple[str, Callable[[str], list[Reference]]]:
+    """Render a cohort of transcripts into one string with namespaced citations.
+
+    Each member is rendered as a block headed by `=== Transcript T{n} (...) ===`
+    with each message prefixed by a namespaced citation `[T{n}:M{k}]` so a model
+    can refer to a specific message in a specific member (e.g. `[T2:M5]`). The
+    returned extractor maps such citations back to `Reference` objects whose
+    `transcript_id` identifies the member they point at.
+
+    Args:
+        transcripts: Cohort member transcripts (1-indexed as T1, T2, ... in order).
+        preprocessor: Message preprocessing/content filtering (per member).
+        header: Optional custom header renderer `(index, transcript) -> str`.
+
+    Returns:
+        Tuple of (rendered string, function mapping text -> list[Reference]).
+    """
+    header = header or _default_transcript_header
+    # "T{n}:M{k}" -> (message id, transcript id)
+    id_map: dict[str, tuple[str, str]] = {}
+    blocks: list[str] = []
+
+    for index, transcript in enumerate(transcripts, start=1):
+        messages = (
+            await preprocessor.transform(transcript)
+            if preprocessor is not None and preprocessor.transform is not None
+            else transcript.messages
+        )
+        lines: list[str] = []
+        ordinal = 0
+        for message in messages:
+            content = message_as_str(message, preprocessor)
+            if content is None:
+                continue
+            ordinal += 1
+            key = f"T{index}:M{ordinal}"
+            id_map[key] = (_message_id(message), transcript.transcript_id)
+            lines.append(f"[{key}] {content}")
+        blocks.append(header(index, transcript) + "\n" + "\n".join(lines))
+
+    body = "\n\n".join(blocks)
+    return body, lambda text: _extract_transcript_references(text, id_map)
+
+
+def _extract_transcript_references(
+    text: str, id_map: dict[str, tuple[str, str]]
+) -> list[Reference]:
+    """Extract namespaced `[T{n}:M{k}]` references from text."""
+    references: list[Reference] = []
+    seen: set[tuple[str, str]] = set()
+    for match in re.finditer(r"\[(T\d+:M\d+)\]", text):
+        cite = match.group(0)
+        key = match.group(1)
+        if key in id_map:
+            message_id, transcript_id = id_map[key]
+            dedup_key = (transcript_id, message_id)
+            if dedup_key not in seen:
+                references.append(
+                    Reference(
+                        type="message",
+                        cite=cite,
+                        id=message_id,
+                        transcript_id=transcript_id,
+                    )
+                )
+                seen.add(dedup_key)
+    return references
 
 
 def message_as_str(

@@ -7353,6 +7353,23 @@
               }
             ],
             "title": "Worklist"
+          },
+          "cohorts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "$ref": "#/components/schemas/CohortMembership"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cohorts"
           }
         },
         "required": [
@@ -7563,6 +7580,16 @@
             "default": 0,
             "title": "Version",
             "type": "integer"
+          },
+          "cohort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CohortSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10582,6 +10609,142 @@
           "transcripts"
         ],
         "title": "Worklist",
+        "type": "object"
+      },
+      "CohortSpec": {
+        "additionalProperties": false,
+        "description": "Specification of how to group transcripts into cohorts for a cohort scanner.\n\nA cohort scanner (declared via `@scanner(group_by=...)` with a\n`Sequence[Transcript]` input) analyzes a group of related transcripts\ntogether. The cohort is defined by holding one or more grouping dimensions\nconstant; transcripts that share the same values for those dimensions form a\ncohort. Provide either `group_by` (explicit dimensions) or `preset` (a named\nset of dimensions).",
+        "properties": {
+          "group_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "task_set",
+                    "task_id",
+                    "task_repeat",
+                    "model",
+                    "agent",
+                    "source_id"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group By"
+          },
+          "max_members": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Members"
+          },
+          "min_size": {
+            "default": 2,
+            "title": "Min Size",
+            "type": "integer"
+          },
+          "preset": {
+            "anyOf": [
+              {
+                "enum": [
+                  "same_task_across_models",
+                  "same_task_in_sample",
+                  "same_task_across_agents"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset"
+          }
+        },
+        "required": [
+          "min_size"
+        ],
+        "title": "CohortSpec",
+        "type": "object"
+      },
+      "CohortMembership": {
+        "description": "A resolved cohort: the concrete set of transcripts in one group.",
+        "properties": {
+          "cohort_id": {
+            "title": "Cohort Id",
+            "type": "string"
+          },
+          "key": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Key",
+            "type": "object"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "max_members": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Members"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "members_digest": {
+            "title": "Members Digest",
+            "type": "string"
+          },
+          "missing_members": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Members",
+            "type": "array"
+          },
+          "total_members": {
+            "default": 0,
+            "title": "Total Members",
+            "type": "integer"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cohort_id",
+          "key",
+          "label",
+          "members",
+          "members_digest",
+          "total_members",
+          "truncated",
+          "missing_members"
+        ],
+        "title": "CohortMembership",
         "type": "object"
       }
     }

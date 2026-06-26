@@ -29,7 +29,7 @@ from .._recorder.buffer import (
     scanner_table,
 )
 from .._scanner.result import Error, ResultReport
-from .._scanspec import ScanSpec, ScanTranscripts
+from .._scanspec import CohortMembership, ScanSpec, ScanTranscripts
 from .._transcript.types import TranscriptInfo
 from .recorder import (
     ScanRecorder,
@@ -128,6 +128,12 @@ class FileRecorder(ScanRecorder):
         return await self._scan_buffer.is_recorded(transcript_id, scanner)
 
     @override
+    async def is_cohort_recorded(
+        self, membership: CohortMembership, scanner: str
+    ) -> bool:
+        return await self._scan_buffer.is_cohort_recorded(membership, scanner)
+
+    @override
     async def record(
         self,
         transcript: TranscriptInfo,
@@ -136,6 +142,16 @@ class FileRecorder(ScanRecorder):
         metrics: dict[str, dict[str, float]] | None,
     ) -> None:
         await self._scan_buffer.record(transcript, scanner, results, metrics)
+
+    @override
+    async def record_cohort(
+        self,
+        membership: CohortMembership,
+        scanner: str,
+        results: Sequence[ResultReport],
+        metrics: dict[str, dict[str, float]] | None,
+    ) -> None:
+        await self._scan_buffer.record_cohort(membership, scanner, results, metrics)
 
     @override
     async def record_metrics(

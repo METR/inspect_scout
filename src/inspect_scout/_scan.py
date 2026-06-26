@@ -62,6 +62,7 @@ from ._recorder.factory import (
     scan_recorder_type_for_location,
 )
 from ._recorder.recorder import ScanRecorder, Status
+from ._scan_cohorts import compute_cohort_plan, scan_cohorts
 from ._scancontext import ScanContext, create_scan, resume_scan
 from ._scanjob import (
     ScanDeprecatedArgs,
@@ -72,7 +73,7 @@ from ._scanner.loader import config_for_loader
 from ._scanner.result import Error, Result, ResultReport, ResultValidation, as_resultset
 from ._scanner.scanner import Scanner, config_for_scanner
 from ._scanner.util import get_input_type_and_ids
-from ._scanspec import ScanSpec, Worklist
+from ._scanspec import CohortMembership, ScanSpec, ScanTranscripts, Worklist
 from ._transcript.transcripts import ScannerWork, Transcripts, TranscriptsReader
 from ._transcript.types import (
     Transcript,
@@ -547,10 +548,24 @@ async def _scan_async_inner(
             # write the snapshot
             await recorder.snapshot_transcripts(snapshot)
 
-            # Count already-completed scans to initialize progress
-            scanner_names_list = list(scan.scanners.keys())
-            if not scanner_names_list:
+            if not scan.scanners:
                 raise PrerequisiteError("No scanners provided")
+
+            # partition scanners into per-transcript scanners (the existing
+            # pipeline) and cohort scanners (run as a separate phase below)
+            pt_scanners = {
+                name: s
+                for name, s in scan.scanners.items()
+                if config_for_scanner(s).cohort is None
+            }
+            cohort_scanners = {
+                name: s
+                for name, s in scan.scanners.items()
+                if config_for_scanner(s).cohort is not None
+            }
+
+            # Count already-completed per-transcript scans to initialize progress
+            scanner_names_list = list(pt_scanners.keys())
             total_scans = 0
             skipped_scans = 0
             for transcript_id in snapshot.transcript_ids.keys():
@@ -559,11 +574,23 @@ async def _scan_async_inner(
                         skipped_scans += 1
                     total_scans += 1
 
-            # override total scans if there is a worklist
+            # override total scans if there is a worklist (per-transcript only)
             if scan.worklist is not None:
-                total_scans = sum(len(work.transcripts) for work in scan.worklist)
+                total_scans = sum(
+                    len(work.transcripts)
+                    for work in scan.worklist
+                    if work.scanner in pt_scanners
+                )
 
-            if total_scans == 0:
+            # compute the cohort plan (freezes cohort membership into the spec so
+            # a resumed scan rebuilds the same groups)
+            cohort_index: dict[str, TranscriptInfo] = {}
+            if cohort_scanners:
+                cohort_index = await compute_cohort_plan(tr, cohort_scanners, scan.spec)
+                # persist the spec (now including the cohort plan)
+                await recorder.snapshot_transcripts(snapshot)
+
+            if total_scans == 0 and not cohort_scanners:
                 raise PrerequisiteError("No transcripts")
 
             # start scan
@@ -575,16 +602,14 @@ async def _scan_async_inner(
                 skipped=skipped_scans,
             ) as scan_display:
                 # Build scanner list and union content for index resolution
-                scanners_list = list(scan.scanners.values())
+                # (per-transcript scanners only; cohort scanners run separately)
+                scanners_list = list(pt_scanners.values())
                 union_content = union_transcript_contents(
-                    [
-                        _content_for_scanner(scanner)
-                        for scanner in scan.scanners.values()
-                    ]
+                    [_content_for_scanner(scanner) for scanner in pt_scanners.values()]
                 )
 
                 # create metrics accumulator
-                metrics_accum = metrics_accumulators(scan.scanners)
+                metrics_accum = metrics_accumulators(pt_scanners)
 
                 async def _transcripts_reader() -> TranscriptsReader:
                     global _process_transcripts_reader
@@ -718,7 +743,8 @@ async def _scan_async_inner(
 
                 prefetch_multiple = 1.0
                 max_tasks = min(
-                    total_scans, scan.spec.options.max_transcripts * len(scan.scanners)
+                    total_scans,
+                    scan.spec.options.max_transcripts * max(1, len(pt_scanners)),
                 )
 
                 diagnostics = os.getenv("SCOUT_DIAGNOSTICS", "false").lower() in (
@@ -791,19 +817,34 @@ async def _scan_async_inner(
                         scan_display.metrics(metrics)
 
                     try:
-                        await strategy(
-                            parse_jobs=_parse_jobs(scan, recorder, tr),
-                            parse_function=_parse_function,
-                            scan_function=_scan_function,
-                            record_results=record_results,
-                            update_metrics=update_metrics,
-                            completed=_strategy_completed,
-                        )
+                        # phase A: per-transcript scanners (existing pipeline)
+                        if pt_scanners:
+                            await strategy(
+                                parse_jobs=_parse_jobs(scan, recorder, tr, pt_scanners),
+                                parse_function=_parse_function,
+                                scan_function=_scan_function,
+                                record_results=record_results,
+                                update_metrics=update_metrics,
+                                completed=_strategy_completed,
+                            )
 
-                        # we've been throttle metrics calculation, now report it all
-                        for scanner in metrics_accum:
-                            await recorder.record_metrics(
-                                scanner, metrics_accum[scanner].compute_metrics()
+                            # we've been throttling metrics calculation, report it all
+                            for scanner in metrics_accum:
+                                await recorder.record_metrics(
+                                    scanner,
+                                    metrics_accum[scanner].compute_metrics(),
+                                )
+
+                        # phase B: cohort scanners (group of transcripts per scan)
+                        if cohort_scanners:
+                            await _run_cohort_phase(
+                                scan=scan,
+                                recorder=recorder,
+                                transcripts=transcripts,
+                                snapshot=snapshot,
+                                cohort_index=cohort_index,
+                                cohort_scanners=cohort_scanners,
+                                fail_on_error=fail_on_error,
                             )
 
                         # report status
@@ -903,10 +944,49 @@ async def handle_scan_interrupted(
     return scan_status
 
 
+async def _run_cohort_phase(
+    *,
+    scan: ScanContext,
+    recorder: ScanRecorder,
+    transcripts: Transcripts,
+    snapshot: ScanTranscripts,
+    cohort_index: dict[str, TranscriptInfo],
+    cohort_scanners: dict[str, Scanner[Any]],
+    fail_on_error: bool,
+) -> None:
+    """Run cohort scanners and report progress."""
+    plan = scan.spec.cohorts or {}
+    total = sum(len(plan.get(name, [])) for name in cohort_scanners)
+    state = {"done": 0}
+
+    def on_complete(
+        scanner_key: str, membership: CohortMembership, recorded: bool
+    ) -> None:
+        state["done"] += 1
+        suffix = " (already recorded)" if recorded else ""
+        display().print(
+            f"cohort {scanner_key} [{state['done']}/{total}]: "
+            f"{membership.label}{suffix}"
+        )
+
+    await scan_cohorts(
+        scan=scan,
+        recorder=recorder,
+        transcripts=transcripts,
+        snapshot=snapshot,
+        cohort_index=cohort_index,
+        cohort_scanners=cohort_scanners,
+        max_concurrency=scan.spec.options.max_transcripts,
+        fail_on_error=fail_on_error,
+        on_complete=on_complete,
+    )
+
+
 async def _parse_jobs(
     context: ScanContext,
     recorder: ScanRecorder | None,
     tr: TranscriptsReader,
+    scanners: dict[str, Scanner[Any]],
 ) -> AsyncIterator[ParseJob]:
     """Yield `ParseJob` objects for transcripts needing scanning.
 
@@ -914,9 +994,15 @@ async def _parse_jobs(
     - Determining union content once
     - Skipping already recorded (per-scanner) work
     - Grouping scanners per transcript
+
+    Args:
+        context: Scan context (for worklist).
+        recorder: Recorder used to skip already-recorded work (or None).
+        tr: Transcripts reader providing the index.
+        scanners: Per-transcript scanners to schedule (excludes cohort scanners).
     """
     # Build name->index mapping for scanners
-    scanner_names = list(context.scanners.keys())
+    scanner_names = list(scanners.keys())
     name_to_index = {name: idx for idx, name in enumerate(scanner_names)}
 
     # build scanner->transcript_ids map from worklist
@@ -963,16 +1049,34 @@ def _transcripts_for_scan_options(scan: ScanContext) -> Transcripts:
 async def _scan_dry_run(scan: ScanContext) -> Status:
     transcripts = _transcripts_for_scan_options(scan)
 
-    scanner_names = [*scan.scanners]
-    per_scanner_counts = {name: 0 for name in scanner_names}
+    pt_scanners = {
+        name: s
+        for name, s in scan.scanners.items()
+        if config_for_scanner(s).cohort is None
+    }
+    cohort_scanners = {
+        name: s
+        for name, s in scan.scanners.items()
+        if config_for_scanner(s).cohort is not None
+    }
+
+    scanner_names = list(pt_scanners.keys())
+    per_scanner_counts = {name: 0 for name in scan.scanners}
 
     async with transcripts.reader() as tr:
         snapshot = await tr.snapshot()
         scan.spec.transcripts = snapshot
 
-        async for job in _parse_jobs(scan, None, tr):
+        async for job in _parse_jobs(scan, None, tr, pt_scanners):
             for scanner_idx in job.scanner_indices:
                 per_scanner_counts[scanner_names[scanner_idx]] += 1
+
+        # count cohorts per cohort scanner
+        if cohort_scanners:
+            cohort_index = await compute_cohort_plan(tr, cohort_scanners, scan.spec)
+            del cohort_index
+            for name in cohort_scanners:
+                per_scanner_counts[name] = len((scan.spec.cohorts or {}).get(name, []))
 
     # create table
     table = Table(
@@ -988,7 +1092,7 @@ async def _scan_dry_run(scan: ScanContext) -> Status:
         min_width=60,
     )
 
-    for name in scanner_names:
+    for name in per_scanner_counts:
         table.add_row(name, f"{per_scanner_counts[name]:,}")
 
     table.add_section()

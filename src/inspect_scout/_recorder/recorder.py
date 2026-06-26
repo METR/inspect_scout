@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from pyarrow import Scalar
 
 from .._scanner.result import Error, ResultReport
-from .._scanspec import ScanSpec, ScanTranscripts
+from .._scanspec import CohortMembership, ScanSpec, ScanTranscripts
 from .._transcript.types import TranscriptInfo
 from .summary import Summary
 
@@ -206,12 +206,26 @@ class ScanRecorder(abc.ABC):
     async def is_recorded(self, transcript_id: str, scanner: str) -> bool: ...
 
     @abc.abstractmethod
+    async def is_cohort_recorded(
+        self, membership: CohortMembership, scanner: str
+    ) -> bool: ...
+
+    @abc.abstractmethod
     async def snapshot_transcripts(self, snapshot: ScanTranscripts) -> None: ...
 
     @abc.abstractmethod
     async def record(
         self,
         transcript: TranscriptInfo,
+        scanner: str,
+        results: Sequence[ResultReport],
+        metrics: dict[str, dict[str, float]] | None,
+    ) -> None: ...
+
+    @abc.abstractmethod
+    async def record_cohort(
+        self,
+        membership: CohortMembership,
         scanner: str,
         results: Sequence[ResultReport],
         metrics: dict[str, dict[str, float]] | None,

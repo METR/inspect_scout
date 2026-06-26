@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 from datetime import datetime
+from logging import getLogger
 from typing import Any, Final, Sequence, Set, TypeVar, cast
 
 import jsonlines
@@ -19,9 +20,11 @@ from inspect_scout._recorder.summary import Summary
 from inspect_scout._util.path import normalize_for_hashing
 
 from .._scanner.result import Error, ResultReport
-from .._scanspec import ScanSpec
+from .._scanspec import CohortMembership, ScanSpec
 from .._transcript.types import TranscriptInfo
 from .._transcript.util import LazyJSONDict
+
+logger = getLogger(__name__)
 
 SCAN_ERRORS = "_errors.jsonl"
 SCAN_SUMMARY = "_summary.json"
@@ -194,6 +197,126 @@ class RecorderBuffer:
             if result.error is not None:
                 with open(str(self._error_file), "at") as f:
                     f.write(result.error.model_dump_json(warnings=False) + "\n")
+
+    async def record_cohort(
+        self,
+        membership: CohortMembership,
+        scanner: str,
+        results: Sequence[ResultReport],
+        metrics: dict[str, dict[str, float]] | None,
+    ) -> None:
+        """Record the result(s) of a cohort scanner for a single cohort.
+
+        Cohort results live in the same `scanner=<key>/` buffer namespace as
+        per-transcript results (the scanner key is unique), but are keyed by
+        `cohort_id` and carry `cohort_*` identity columns instead of `transcript_*`.
+        """
+        records = [
+            cast(
+                dict[str, str | bool | int | float | None],
+                {
+                    "cohort_id": membership.cohort_id,
+                    "cohort_label": membership.label,
+                    "cohort_key": membership.key,
+                    "cohort_members": membership.members,
+                    "cohort_members_digest": membership.members_digest,
+                    "cohort_size": len(membership.members),
+                    "cohort_total_members": membership.total_members,
+                    "cohort_truncated": membership.truncated,
+                    "cohort_missing_members": membership.missing_members,
+                    "scan_id": self._spec.scan_id,
+                    "scan_tags": self._spec.tags or [],
+                    "scan_metadata": self._spec.metadata or {},
+                    "scan_git_origin": self._spec.revision.origin
+                    if self._spec.revision
+                    else None,
+                    "scan_git_version": self._spec.revision.version
+                    if self._spec.revision
+                    else None,
+                    "scan_git_commit": self._spec.revision.commit
+                    if self._spec.revision
+                    else None,
+                    "scanner_key": scanner,
+                    "scanner_name": self._spec.scanners[scanner].name,
+                    "scanner_version": self._spec.scanners[scanner].version,
+                    "scanner_package_version": self._spec.scanners[
+                        scanner
+                    ].package_version,
+                    "scanner_file": self._spec.scanners[scanner].file,
+                    "scanner_params": self._spec.scanners[scanner].params,
+                },
+            )
+            | result.to_df_columns()
+            | {"timestamp": datetime.now().astimezone().isoformat()}
+            for result in results
+        ]
+        if not records:
+            return
+
+        table = _records_to_arrow(records)
+
+        # Cohort results live under the cohort scanner's (unique) key, keyed by
+        # cohort_id instead of transcript_id.
+        sdir = self._buffer_dir / f"scanner={_sanitize_component(scanner)}"
+        sdir.mkdir(parents=True, exist_ok=True)
+
+        cohort_file = _sanitize_component(membership.cohort_id)
+        final_path = sdir / f"{cohort_file}.parquet"
+
+        # Atomic write: write to .tmp, then os.replace to final
+        tmp_path = sdir / f".{cohort_file}.parquet.tmp"
+        pq.write_table(
+            table,
+            tmp_path.as_posix(),
+            compression="zstd",
+            use_dictionary=True,
+        )
+        os.replace(tmp_path.as_posix(), final_path.as_posix())
+
+        # update and write summary
+        self._scan_summary._report_cohort(scanner, results, metrics)
+        with open(self._buffer_dir.joinpath(SCAN_SUMMARY).as_posix(), "w") as f:
+            f.write(self._scan_summary.model_dump_json(indent=2))
+
+        # record errors
+        for result in results:
+            if result.error is not None:
+                with open(str(self._error_file), "at") as f:
+                    f.write(result.error.model_dump_json(warnings=False) + "\n")
+
+    async def is_cohort_recorded(
+        self, membership: CohortMembership, scanner: str
+    ) -> bool:
+        """Whether a cohort has already been recorded (error-free and not drifted).
+
+        Returns False (forcing a re-scan) if the cohort file is missing, contains
+        an error, or its recorded membership differs from `membership` (drift).
+        """
+        sdir = self._buffer_dir / f"scanner={_sanitize_component(scanner)}"
+        cohort_file = sdir / f"{_sanitize_component(membership.cohort_id)}.parquet"
+        if not cohort_file.exists():
+            return False
+
+        table = pq.read_table(
+            cohort_file.as_posix(),
+            columns=["scan_error", "cohort_members_digest"],
+        )
+        scan_errors = table.column("scan_error")
+        if pc.any(pc.is_valid(scan_errors)).as_py():
+            return False
+
+        digests = table.column("cohort_members_digest").to_pylist()
+        stored_digest = digests[0] if digests else None
+        if stored_digest != membership.members_digest:
+            logger.warning(
+                "Cohort '%s' membership changed since it was last scanned; "
+                "re-scanning (scanner '%s').",
+                membership.label,
+                scanner,
+            )
+            return False
+
+        return True
 
     async def record_metrics(
         self,

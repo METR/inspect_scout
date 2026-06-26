@@ -6,7 +6,11 @@ from inspect_ai._util.registry import registry_info
 from inspect_ai.scorer import Metric, SampleScore, Score, Value
 from pydantic import JsonValue
 
-from inspect_scout._scanner.scanner import SCANNER_METRICS, Scanner
+from inspect_scout._scanner.scanner import (
+    SCANNER_METRICS,
+    Scanner,
+    config_for_scanner,
+)
 from inspect_scout._util.throttle import throttle
 
 
@@ -50,6 +54,10 @@ def metrics_accumulators(
 ) -> dict[str, MetricsAccumulator]:
     accumulators: dict[str, MetricsAccumulator] = {}
     for name, scanner in scanners.items():
+        # cohort scanners produce aggregate (group-level) values and must not be
+        # fed into per-sample metric aggregation
+        if config_for_scanner(scanner).cohort is not None:
+            continue
         metrics = metrics_for_scanner(scanner)
         if metrics is not None:
             accumulators[name] = MetricsAccumulator(

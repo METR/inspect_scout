@@ -38,6 +38,7 @@ from inspect_ai.model._chat_message import (
 )
 
 from .._transcript.types import EventType, MessageType, Transcript
+from .cohort_input import Cohort
 
 # Reverse mappings for inferring filters from types
 TYPE_TO_MESSAGE_FILTER: dict[type[Any], str] = {
@@ -158,6 +159,65 @@ def infer_filters_from_type(
         message_filters if message_filters else None,
         event_filters if event_filters else None,
     )
+
+
+def _first_param_type(
+    scanner_fn: Callable[..., Any], factory_globals: dict[str, Any]
+) -> Any | None:
+    """Resolve the type annotation of a scanner's first parameter (or None)."""
+    try:
+        hints = get_type_hints(
+            scanner_fn, globalns=factory_globals, localns=factory_globals
+        )
+    except Exception:
+        return None
+    param_names = list(inspect.signature(scanner_fn).parameters.keys())
+    if not param_names:
+        return None
+    input_param = param_names[0]
+    return hints.get(input_param, None)
+
+
+def _is_cohort_input(input_type: Any) -> bool:
+    """Return True if `input_type` is the `Cohort` input type."""
+    try:
+        return input_type is Cohort or (
+            inspect.isclass(input_type) and issubclass(input_type, Cohort)
+        )
+    except TypeError:
+        return False
+
+
+def is_cohort_signature(
+    scanner_fn: Callable[..., Any], factory_globals: dict[str, Any]
+) -> bool:
+    """Return True if the scanner's first parameter is a `Cohort`.
+
+    This identifies a *cohort scanner* (one that analyzes a group of transcripts
+    together) from its input annotation.
+    """
+    input_type = _first_param_type(scanner_fn, factory_globals)
+    return input_type is not None and _is_cohort_input(input_type)
+
+
+def validate_cohort_scanner_signature(
+    scanner_fn: Callable[..., Any], factory_globals: dict[str, Any]
+) -> None:
+    """Validate that a cohort scanner accepts a `Cohort`.
+
+    Raises:
+        TypeError: If the scanner's first parameter is annotated but is not a
+            `Cohort`.
+    """
+    input_type = _first_param_type(scanner_fn, factory_globals)
+    # no annotation -> can't validate, let it pass (consistent with other validators)
+    if input_type is None:
+        return
+    if not _is_cohort_input(input_type):
+        raise TypeError(
+            "Cohort scanner (declared with group_by=...) must accept a `Cohort`, "
+            f"but scanner accepts {input_type}."
+        )
 
 
 def validate_scanner_signature(

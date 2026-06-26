@@ -92,6 +92,28 @@ class Summary(BaseModel):
         results: Sequence[ResultReport],
         metrics: dict[str, dict[str, float]] | None,
     ) -> None:
+        self._report_results(scanner, results, metrics)
+
+    def _report_cohort(
+        self,
+        scanner: str,
+        results: Sequence[ResultReport],
+        metrics: dict[str, dict[str, float]] | None,
+    ) -> None:
+        """Report cohort scanner results into the scanner's own summary bucket.
+
+        Cohort scanners have a distinct scanner key, so their counts never mix
+        with per-transcript scanners, and (lacking per-sample validation) they do
+        not pollute validation metrics.
+        """
+        self._report_results(scanner, results, metrics)
+
+    def _report_results(
+        self,
+        scanner: str,
+        results: Sequence[ResultReport],
+        metrics: dict[str, dict[str, float]] | None,
+    ) -> None:
         # Collect validation entries from results
         new_entries: list[ValidationEntry] = []
         agg_results = 0
