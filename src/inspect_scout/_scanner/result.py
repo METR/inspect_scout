@@ -27,6 +27,14 @@ class Reference(BaseModel):
     id: str
     """Reference id (message or event id)"""
 
+    transcript_id: str | None = Field(default=None)
+    """Transcript the referenced message/event belongs to (optional).
+
+    Populated by cohort scanners so a citation can identify which member
+    transcript it points at (e.g. `[T2:M5]`). `None` for single-transcript
+    scanners, where the owning transcript is unambiguous.
+    """
+
 
 class Result(BaseModel):
     """Scan result."""
@@ -63,8 +71,11 @@ def as_resultset(results: list[Result]) -> Result:
 class Error(BaseModel):
     """Scan error (runtime error which occurred during scan)."""
 
-    transcript_id: str
-    """Target transcript id."""
+    transcript_id: str | None = Field(default=None)
+    """Target transcript id (None for cohort-level errors)."""
+
+    cohort_id: str | None = Field(default=None)
+    """Target cohort id (set for cohort scanner errors, otherwise None)."""
 
     scanner: str
     """Scanner name."""
@@ -110,10 +121,15 @@ class ResultReport(BaseModel):
     def to_df_columns(self) -> dict[str, str | bool | int | float | None]:
         columns: dict[str, str | bool | int | float | None] = {}
 
-        # input (transcript, event, or message)
+        # input (transcript, event, message, or transcripts/cohort)
         columns["input_type"] = self.input_type
         columns["input_ids"] = json.dumps(self.input_ids)
-        columns["input"] = to_json_str_safe(self.input)
+        if self.input_type == "transcripts":
+            # cohort input: store only a lightweight descriptor (member ids), never
+            # the full transcript bodies (which would re-bloat the recorded row)
+            columns["input"] = json.dumps({"transcript_ids": self.input_ids})
+        else:
+            columns["input"] = to_json_str_safe(self.input)
 
         if self.result is not None:
             # result

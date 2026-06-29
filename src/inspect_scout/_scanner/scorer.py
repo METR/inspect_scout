@@ -44,6 +44,15 @@ def as_scorer(
         raise RuntimeError(
             "Agent passed to as_solver was not created by an @agent decorated function"
         )
+
+    # cohort scanners analyze a group of transcripts and cannot act as a
+    # per-sample Inspect scorer
+    if config_for_scanner(scanner).cohort is not None:
+        raise ValueError(
+            "Cohort scanners (declared with group_by=...) cannot be used as Inspect "
+            "scorers, which score a single sample at a time."
+        )
+
     scanner_name = registry_unqualified_name(scanner)
 
     # determine metrics (passed, declared on scanner, or default)

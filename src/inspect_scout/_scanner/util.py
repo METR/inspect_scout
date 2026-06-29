@@ -30,6 +30,11 @@ def get_input_type_and_ids(
         return ("event", [_event_id(loader_result)])
     elif len(loader_result) == 0:
         return None
+    elif isinstance(loader_result[0], Transcript):
+        return (
+            "transcripts",
+            [t.transcript_id for t in cast(Sequence[Transcript], loader_result)],
+        )
     elif isinstance(loader_result[0], ChatMessageBase):
         return (
             "messages",

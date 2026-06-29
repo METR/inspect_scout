@@ -6,6 +6,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     field_serializer,
     model_validator,
 )
@@ -17,6 +18,98 @@ from inspect_scout._query.condition_sql import condition_as_sql
 from inspect_scout._validation.types import ValidationSet
 
 from ._util.constants import DEFAULT_MAX_TRANSCRIPTS
+
+GroupDim = Literal["task_set", "task_id", "task_repeat", "model", "agent", "source_id"]
+"""Transcript dimension usable to group transcripts into a cohort.
+
+These map directly to fields on `TranscriptInfo`.
+"""
+
+CohortPreset = Literal[
+    "same_task_across_models",
+    "same_task_in_sample",
+    "same_task_across_agents",
+]
+"""Named cohort grouping presets.
+
+- `same_task_across_models`: group by `(task_set, task_id)` — the same task
+  prompt attempted by different models.
+- `same_task_in_sample`: group by `(task_set, task_id, model, agent)` — repeated
+  epochs (`task_repeat`) of one model+agent configuration.
+- `same_task_across_agents`: group by `(task_set, task_id, model)` — the same
+  model with different agent scaffolds.
+"""
+
+COHORT_PRESETS: dict[CohortPreset, list[GroupDim]] = {
+    "same_task_across_models": ["task_set", "task_id"],
+    "same_task_in_sample": ["task_set", "task_id", "model", "agent"],
+    "same_task_across_agents": ["task_set", "task_id", "model"],
+}
+"""Mapping of cohort preset names to their grouping dimensions."""
+
+
+class CohortSpec(BaseModel):
+    """Specification of how to group transcripts into cohorts for a cohort scanner.
+
+    A cohort scanner (declared via `@scanner(group_by=...)` with a
+    `Sequence[Transcript]` input) analyzes a group of related transcripts
+    together. The cohort is defined by holding one or more grouping dimensions
+    constant; transcripts that share the same values for those dimensions form a
+    cohort. Provide either `group_by` (explicit dimensions) or `preset` (a named
+    set of dimensions).
+    """
+
+    group_by: list[GroupDim] | None = Field(default=None)
+    """Dimensions held constant to form a cohort (e.g. `["task_set", "task_id"]`)."""
+
+    preset: CohortPreset | None = Field(default=None)
+    """Named grouping preset (takes precedence over `group_by` when set)."""
+
+    min_size: int = Field(default=2)
+    """Minimum number of transcripts for a group to be scanned as a cohort."""
+
+    max_members: int | None = Field(default=None)
+    """Maximum transcripts to include per cohort (bounds worker memory and prompt
+    size). When a cohort exceeds this, members are truncated (deterministically by
+    transcript id) and the result is flagged."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CohortMembership(BaseModel):
+    """A resolved cohort: the concrete set of transcripts in one group."""
+
+    cohort_id: str
+    """Stable, filesystem-safe identifier derived from the grouping dimension values."""
+
+    key: dict[str, JsonValue]
+    """The grouping dimension values that define this cohort (e.g. `{"task_set": "cybench", "task_id": "crypto-1"}`)."""
+
+    label: str
+    """Human-readable cohort label (e.g. `task_set=cybench | task_id=crypto-1`)."""
+
+    members: list[str]
+    """Sorted transcript ids belonging to this cohort (after any `max_members` truncation)."""
+
+    members_digest: str
+    """Hash of the member ids (and cap), used to detect membership drift on resume."""
+
+    total_members: int = Field(default=0)
+    """Number of transcripts matched before any `max_members` truncation."""
+
+    truncated: bool = Field(default=False)
+    """Whether `members` was truncated due to `max_members`."""
+
+    max_members: int | None = Field(default=None)
+    """The `max_members` cap in effect (folded into `members_digest`)."""
+
+    missing_members: list[str] = Field(default_factory=list)
+    """Planned members that could not be read when the cohort was scanned.
+
+    Non-empty only for a degraded (subset) scan; `members`/`members_digest` then
+    reflect the members actually scanned, so the cohort re-runs once the missing
+    members become available.
+    """
 
 
 class ScannerSpec(BaseModel):
@@ -36,6 +129,13 @@ class ScannerSpec(BaseModel):
 
     params: dict[str, Any] = Field(default_factory=dict)
     """Scanner arguments."""
+
+    cohort: CohortSpec | None = Field(default=None)
+    """Cohort grouping for this scanner (set for cohort scanners).
+
+    When present, this scanner is a *cohort scanner*: it is applied once per
+    cohort of transcripts (grouped per this spec) rather than once per transcript.
+    """
 
 
 GIT_VERSION_UNKNOWN = "0.0.0-dev.0+unknown"
@@ -195,6 +295,13 @@ class ScanSpec(BaseModel):
 
     worklist: list[Worklist] | None = Field(default=None)
     """Transcript ids to process for each scanner (defaults to processing all transcripts)."""
+
+    cohorts: dict[str, list[CohortMembership]] | None = Field(default=None)
+    """Resolved cohorts for each cohort scanner (scanner key -> cohorts).
+
+    Frozen at scan creation from the transcript snapshot so a resumed scan
+    rebuilds the same groups from the spec.
+    """
 
     validation: dict[str, ValidationSet] | None = Field(default=None)
     """Validation cases to apply for scanners."""

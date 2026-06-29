@@ -38,7 +38,7 @@ from typing_extensions import Unpack
 
 from inspect_scout._project import ProjectConfig
 from inspect_scout._scanjob_config import ScanJobConfig
-from inspect_scout._scanspec import Worklist
+from inspect_scout._scanspec import CohortSpec, Worklist
 from inspect_scout._transcript.factory import transcripts_from
 from inspect_scout._util.decorator import split_spec
 from inspect_scout._util.deprecation import raise_results_error, show_results_warning
@@ -64,6 +64,7 @@ class ScanJob:
         scanners: Sequence[Scanner[Any] | tuple[str, Scanner[Any]]]
         | dict[str, Scanner[Any]],
         worklist: Sequence[Worklist] | None = None,
+        cohort: dict[str, CohortSpec] | None = None,
         validation: dict[str, ValidationSet] | None = None,
         scans: str | None = None,
         model: str | Model | None = None,
@@ -93,6 +94,7 @@ class ScanJob:
         # save transcripts and name
         self._transcripts = transcripts
         self._worklist = worklist
+        self._cohort = cohort
         self._validation = validation
         self._name = name
         self._scans = scans
@@ -160,6 +162,19 @@ class ScanJob:
         elif isinstance(config.scanners, dict):
             kwargs["scanners"] = scanners_from_spec_dict(config.scanners)
 
+        # extract per-scanner cohort overrides (keyed by scanner key)
+        cohort_overrides: dict[str, CohortSpec] = {}
+        if isinstance(config.scanners, dict):
+            for key, spec in config.scanners.items():
+                if spec.cohort is not None:
+                    cohort_overrides[key] = spec.cohort
+        elif isinstance(config.scanners, list):
+            for spec in config.scanners:
+                if spec.cohort is not None:
+                    cohort_overrides[spec.name] = spec.cohort
+        if cohort_overrides:
+            kwargs["cohort"] = cohort_overrides
+
         # realize transcripts
         if config.transcripts is not None:
             transcripts = transcripts_from(config.transcripts)
@@ -200,6 +215,16 @@ class ScanJob:
     def worklist(self) -> Sequence[Worklist] | None:
         """Transcript ids to process for each scanner (defaults to processing all transcripts)."""
         return self._worklist
+
+    @property
+    def cohort(self) -> dict[str, CohortSpec] | None:
+        """Per-scanner cohort grouping overrides (scanner key -> cohort spec).
+
+        Overrides the default `group_by` declared on a cohort scanner's
+        `@scanner(group_by=...)` decorator, enabling one scanner to run at
+        different scopes under different keys.
+        """
+        return self._cohort
 
     @property
     def validation(self) -> dict[str, ValidationSet] | None:

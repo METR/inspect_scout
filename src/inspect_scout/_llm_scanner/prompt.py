@@ -17,6 +17,25 @@ Your answer should include an explanation of your assessment. It should include 
 """
 
 
+DEFAULT_COHORT_TEMPLATE = """
+You are an expert in LLM transcript analysis. Below are {{ cohort_size }} transcripts of different attempts at the SAME task (e.g. different models, agents, or epochs). Each transcript is labeled T1, T2, ... and each of its messages is labeled like [T1:M3].
+
+[BEGIN TRANSCRIPTS]
+===================================
+{{ transcripts }}
+===================================
+[END TRANSCRIPTS]
+
+{{ answer_prompt }}
+
+{{ question }}
+
+Compare the transcripts against one another. Your answer should include an explanation that cites specific messages using their labels (e.g. '[T2:M5]') to identify the decision points or chokepoints where the attempts diverged.
+
+{{ answer_format }}
+"""
+
+
 ANSWER_FORMAT_PREAMBLE = (
     "The last line of your response should be of the following format:\n\n"
 )

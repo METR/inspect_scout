@@ -38,6 +38,7 @@ from typing_extensions import overload
 from inspect_scout._util.decorator import fixup_wrapper_annotations, split_spec
 
 from .._concurrency._mp_common import register_plugin_directory
+from .._scanspec import CohortSpec, GroupDim
 from .._transcript.types import (
     EventType,
     MessageType,
@@ -45,14 +46,20 @@ from .._transcript.types import (
     TranscriptContent,
 )
 from ._loaders import create_implicit_loader
+from .cohort_input import Cohort
 from .filter import (
     normalize_events_filter,
     normalize_messages_filter,
 )
 from .loader import Loader
 from .result import Result
-from .types import ScannerInput
-from .validate import infer_filters_from_type, validate_scanner_signature
+from .types import AnyScannerInput, ScannerInput
+from .validate import (
+    infer_filters_from_type,
+    is_cohort_signature,
+    validate_cohort_scanner_signature,
+    validate_scanner_signature,
+)
 
 SCANNER_CONFIG = "scanner_config"
 SCANNER_METRICS = "scanner_metrics"
@@ -62,8 +69,9 @@ SCANNER_FILE_ATTR = "___scanner_file___"
 SCANNER_NAME_ATTR = "___scanner_name___"
 
 # core types
-# Use bounded TypeVar (contravariant for scanner input)
-T = TypeVar("T", bound=ScannerInput, contravariant=True)
+# Use bounded TypeVar (contravariant for scanner input). AnyScannerInput includes
+# Cohort so that cohort scanners can be typed `Scanner[Cohort]`.
+T = TypeVar("T", bound=AnyScannerInput, contravariant=True)
 TM = TypeVar(
     "TM", bound=Transcript | ChatMessage | list[ChatMessage], contravariant=True
 )
@@ -93,6 +101,9 @@ class ScannerConfig:
     content: TranscriptContent = field(default_factory=TranscriptContent)
     # TODO: I want to make loader non-optional, but this obviously isn't right
     loader: Loader[ScannerInput] = field(default=cast(Loader[ScannerInput], None))
+    # Set for cohort scanners (input is Sequence[Transcript]); None for
+    # per-transcript scanners. Cohort scanners do not use `loader`.
+    cohort: CohortSpec | None = field(default=None)
 
 
 ScannerFactory = Callable[P, Scanner[T]]
@@ -204,6 +215,25 @@ def scanner(
 ) -> Callable[[ScannerFactory[P, TE]], ScannerFactory[P, ScannerInput]]: ...
 
 
+# overload for cohort scanners (input is a sequence of transcripts grouped by
+# the given dimensions). Cohort scanners must declare the content they read.
+@overload
+def scanner(
+    *,
+    group_by: Sequence[GroupDim],
+    messages: list[MessageType] | Literal["all"] | None = ...,
+    events: list[EventType] | Literal["all"] | None = ...,
+    name: str | None = ...,
+    version: int = 0,
+    metrics: Sequence[Metric | Mapping[str, Sequence[Metric]]]
+    | Mapping[str, Sequence[Metric]]
+    | None = ...,
+) -> Callable[
+    [ScannerFactory[P, Cohort]],
+    ScannerFactory[P, Cohort],
+]: ...
+
+
 # overload for direct decoration without parentheses (will infer from types)
 # This needs to be last as it's the most general
 @overload
@@ -216,6 +246,7 @@ def scanner(
     loader: Loader[TScan] | None = None,
     messages: list[MessageType] | Literal["all"] | None = None,
     events: list[EventType] | Literal["all"] | None = None,
+    group_by: Sequence[GroupDim] | None = None,
     name: str | None = None,
     version: int = 0,
     metrics: Sequence[Metric | Mapping[str, Sequence[Metric]]]
@@ -230,6 +261,7 @@ def scanner(
     loader: Loader[TScan] | None = None,
     messages: list[MessageType] | Literal["all"] | None = None,
     events: list[EventType] | Literal["all"] | None = None,
+    group_by: Sequence[GroupDim] | None = None,
     name: str | None = None,
     version: int = 0,
     metrics: Sequence[Metric | Mapping[str, Sequence[Metric]]]
@@ -241,6 +273,10 @@ def scanner(
     | Callable[[ScannerFactory[P, TScan]], ScannerFactory[P, TScan]]
     | Callable[[ScannerFactory[P, TM]], ScannerFactory[P, ScannerInput]]
     | Callable[[ScannerFactory[P, TE]], ScannerFactory[P, ScannerInput]]
+    | Callable[
+        [ScannerFactory[P, Cohort]],
+        ScannerFactory[P, Cohort],
+    ]
 ):
     """Decorator for registering scanners.
 
@@ -249,6 +285,12 @@ def scanner(
        loader: Custom data loader for scanner.
        messages: Message types to scan.
        events: Event types to scan.
+       group_by: Grouping dimensions for a *cohort scanner* (a scanner whose
+           input is a `Sequence[Transcript]`). When provided, the scanner is
+           applied once per cohort of transcripts that share these dimension
+           values (e.g. `["task_set", "task_id"]`). The scope can be overridden
+           per-scanner in a scan job / `scout.yaml`. Cohort scanners must declare
+           the content they read via `messages`/`events`.
        name: Scanner name (defaults to function name).
        version: Scanner version (defaults to 0).
        metrics: One or more metrics to calculate over the values
@@ -285,6 +327,54 @@ def scanner(
                 raise TypeError(
                     f"'{scanner_name}' is not declared as an async callable."
                 )
+
+            # Cohort scanners (input is Sequence[Transcript]) are applied once per
+            # cohort of transcripts rather than once per transcript. They are
+            # identified by an explicit group_by or a Sequence[Transcript] input
+            # annotation, and must declare the content they read explicitly.
+            if group_by is not None or is_cohort_signature(
+                scanner_fn, factory_fn.__globals__
+            ):
+                validate_cohort_scanner_signature(scanner_fn, factory_fn.__globals__)
+                if messages is None and events is None:
+                    raise ValueError(
+                        f"cohort scanner '{scanner_name}' must declare the "
+                        "transcript content it reads via messages=... and/or "
+                        "events=... (content cannot be inferred from "
+                        "Sequence[Transcript])."
+                    )
+
+                cohort_config = ScannerConfig()
+                if messages is not None:
+                    cohort_config.content.messages = messages
+                if events is not None:
+                    cohort_config.content.events = events
+                cohort_config.cohort = CohortSpec(
+                    group_by=list(group_by) if group_by is not None else None
+                )
+
+                registry_tag(
+                    factory_fn,
+                    scanner_fn,
+                    RegistryInfo(
+                        type="scanner",
+                        name=scanner_name,
+                        metadata={
+                            SCANNER_CONFIG: cohort_config,
+                            SCANNER_METRICS: metrics,
+                            SCANNER_VERSION: version,
+                        },
+                    ),
+                    *args,
+                    **kwargs,
+                )
+
+                if get_installed_package_name(factory_fn) is None:
+                    file = inspect.getfile(factory_fn)
+                    if file:
+                        setattr(scanner_fn, SCANNER_FILE_ATTR, Path(file).as_posix())
+
+                return scanner_fn
 
             # Infer filters from type annotations if not provided
             # Use explicit filters if provided, otherwise try to infer

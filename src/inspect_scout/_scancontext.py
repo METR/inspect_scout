@@ -34,10 +34,12 @@ from ._scanjob import SCANJOB_FILE_ATTR, ScanJob
 from ._scanner.scanner import (
     SCANNER_FILE_ATTR,
     Scanner,
+    config_for_scanner,
     scanner_create,
     scanner_version,
 )
 from ._scanspec import (
+    CohortSpec,
     ScannerSpec,
     ScanOptions,
     ScanSpec,
@@ -95,7 +97,7 @@ async def create_scan(scanjob: ScanJob) -> ScanContext:
         scan_name=scanjob.name or "scan",
         scan_args=job_args(scanjob),
         options=options or ScanOptions(),
-        scanners=_spec_scanners(scanjob.scanners),
+        scanners=_spec_scanners(scanjob.scanners, scanjob.cohort),
         worklist=list(scanjob.worklist) if scanjob.worklist else None,
         validation=scanjob.validation,
         tags=scanjob.tags,
@@ -145,17 +147,27 @@ async def resume_scan(scan_location: str) -> ScanContext:
 
 def _spec_scanners(
     scanners: dict[str, Scanner[Any]],
+    cohort_overrides: dict[str, CohortSpec] | None = None,
 ) -> dict[str, ScannerSpec]:
-    return {
-        k: ScannerSpec(
+    result: dict[str, ScannerSpec] = {}
+    for k, v in scanners.items():
+        # resolve the effective cohort spec for cohort scanners: a per-scanner
+        # override (e.g. from scout.yaml) takes precedence over the default
+        # declared on the @scanner(group_by=...) decorator
+        config = config_for_scanner(v)
+        cohort: CohortSpec | None = None
+        if config.cohort is not None:
+            override = cohort_overrides.get(k) if cohort_overrides else None
+            cohort = override or config.cohort
+        result[k] = ScannerSpec(
             name=registry_log_name(v),
             version=scanner_version(v),
             package_version=_scanner_package_version(v),
             file=scanner_file(v),
             params=registry_params(v),
+            cohort=cohort,
         )
-        for k, v in scanners.items()
-    }
+    return result
 
 
 def _scanner_package_version(scanner: Scanner[Any]) -> str | None:
