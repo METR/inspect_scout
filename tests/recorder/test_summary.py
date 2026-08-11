@@ -228,6 +228,61 @@ class TestComputeValidationMetrics:
         assert metrics.precision == 1.0
         assert metrics.recall == 1.0
 
+    def test_dict_target_uses_per_key_expectation(self) -> None:
+        """Dict targets carry one expectation per key (the production shape).
+
+        This is what dict- and label-based validation produce: ``target`` is a
+        dict keyed like ``valid``. Key ``b`` is expected negative (target False)
+        in both entries, so a scanner that correctly finds it absent is a true
+        negative and one that flags it is a false positive. Judging ``b`` against
+        the whole target dict (always truthy) would instead record tp/fn, pinning
+        precision at 1.0 and leaving specificity undefined.
+        """
+        validations = [
+            # b correctly found absent -> true negative for b
+            ValidationEntry(
+                id="t1", target={"a": True, "b": False}, valid={"a": True, "b": True}
+            ),
+            # b wrongly flagged present -> false positive for b
+            ValidationEntry(
+                id="t2", target={"a": True, "b": False}, valid={"a": True, "b": False}
+            ),
+        ]
+        result = compute_validation_metrics(validations)
+        assert result is not None
+        _, per_key = result
+        assert per_key is not None
+        # b is a negative target throughout: one tn, one fp, no positives.
+        assert per_key["b"].tp == 0
+        assert per_key["b"].fn == 0
+        assert per_key["b"].tn == 1
+        assert per_key["b"].fp == 1
+        assert per_key["b"].specificity == 0.5
+        # a is a positive target and passes both times: two true positives.
+        assert per_key["a"].tp == 2
+        assert per_key["a"].fp == 0
+
+    def test_labels_shape_negative_expectation_scored(self) -> None:
+        """Label-based validation (target == the labels dict) scores negatives.
+
+        Label validation stores the labels dict as ``target``. A label expected
+        absent that the scanner correctly leaves unflagged must count as a true
+        negative, not a true positive.
+        """
+        validations = [
+            ValidationEntry(
+                id="r1",
+                target={"deception": True, "sandbagging": False},
+                valid={"deception": True, "sandbagging": True},
+            ),
+        ]
+        result = compute_validation_metrics(validations)
+        assert result is not None
+        _, per_key = result
+        assert per_key is not None
+        assert per_key["sandbagging"].tn == 1
+        assert per_key["sandbagging"].tp == 0
+
 
 class TestValidationResults:
     """Tests for ValidationResults model."""

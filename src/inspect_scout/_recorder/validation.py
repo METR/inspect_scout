@@ -159,11 +159,22 @@ def compute_validation_metrics(
         # Per-key metrics
         per_key: dict[str, ValidationMetrics] = {}
         for entry in with_targets:
-            target_positive = is_positive_value(entry.target)
             if isinstance(entry.valid, dict):
                 for key, valid in entry.valid.items():
                     if key not in per_key:
                         per_key[key] = ValidationMetrics()
+                    # The expected target is per key: a dict target (produced by
+                    # dict- and label-based validation) carries one expectation
+                    # per key, so each key must be judged against its own target.
+                    # Using is_positive_value on the whole dict would always be
+                    # truthy, collapsing every key to a positive expectation and
+                    # making tn/fp impossible (precision pinned at 1.0,
+                    # specificity/accuracy always None). Fall back to the scalar
+                    # target for the legacy scalar-target-with-dict-valid shape.
+                    if isinstance(entry.target, dict):
+                        target_positive = is_positive_value(entry.target.get(key))
+                    else:
+                        target_positive = is_positive_value(entry.target)
                     _update_metrics(per_key[key], target_positive, valid)
 
         # Total is sum of per-key
