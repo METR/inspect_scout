@@ -28,6 +28,7 @@ from inspect_ai._util.error import PrerequisiteError
 from inspect_ai._util.json import jsonable_python
 from inspect_ai._util.path import pretty_path
 from inspect_ai._util.platform import platform_init as init_platform
+from inspect_ai._util.registry import is_registry_object
 from inspect_ai._util.rich import clean_control_characters
 from inspect_ai.model._generate_config import GenerateConfig
 from inspect_ai.model._model import (
@@ -1122,11 +1123,27 @@ async def _transcript_for_record(handle: TranscriptHandle) -> ReportInput:
     return await handle.load()
 
 
-def _reference_for_record(handle: TranscriptHandle) -> ReferenceTranscript:
+def _reference_for_record(
+    transcript: TranscriptHandle | Transcript, scanner: Scanner[Any]
+) -> ReferenceTranscript:
+    """Reference to `transcript` carrying the content filters `scanner` saw.
+
+    The scanner's own filters (not a shared handle's union) so resolution
+    reproduces exactly that scanner's input, on handle and materialized paths.
+    """
+    info = transcript if isinstance(transcript, Transcript) else transcript.info
+    config = config_for_scanner(scanner)
+    # An unregistered (non-@loader) custom loader has no loader config; fall
+    # back to the scanner's declared filters rather than failing the record.
+    content = (
+        config_for_loader(config.loader).content
+        if is_registry_object(config.loader)
+        else config.content
+    )
     return ReferenceTranscript(
-        source_uri=handle.info.source_uri,
-        transcript_id=handle.info.transcript_id,
-        content_json=handle.content.to_json(),
+        source_uri=info.source_uri,
+        transcript_id=info.transcript_id,
+        content_json=content.to_json(),
     )
 
 
@@ -1154,7 +1171,8 @@ async def _scan_one(
     `record_input="reference"` short-circuits the record path: a handle
     input never serializes (it's recorded via `_reference_for_record`
     instead of `_transcript_for_record`), and a materialized `Transcript`
-    loader input is recorded as a `ReferenceTranscript` with no content_json.
+    loader input is recorded as a `ReferenceTranscript` too. Both carry the
+    scanner's own content filters.
     Non-transcript loader inputs (events/messages) are unaffected.
     """
     from inspect_ai.log._transcript import (
@@ -1188,16 +1206,7 @@ async def _scan_one(
         union = job.union_transcript
         report_input: ReportInput
         if record_input == "reference":
-            # No content filters exist for a materialized union; content_json
-            # None makes resolution default to full content.
-            if isinstance(union, Transcript):
-                report_input = ReferenceTranscript(
-                    source_uri=union.source_uri,
-                    transcript_id=union.transcript_id,
-                    content_json=None,
-                )
-            else:
-                report_input = _reference_for_record(union)
+            report_input = _reference_for_record(union, job.scanner)
         elif isinstance(union, Transcript):
             report_input = union
         else:
@@ -1350,7 +1359,7 @@ async def _scan_one(
             report_input: ReportInput
             if handle_input is not None:
                 if record_input == "reference":
-                    report_input = _reference_for_record(handle_input)
+                    report_input = _reference_for_record(handle_input, job.scanner)
                 else:
                     try:
                         report_input = await _transcript_for_record(handle_input)
@@ -1369,7 +1378,7 @@ async def _scan_one(
                             ex.cell,
                             ex.size,
                         )
-                        report_input = _reference_for_record(handle_input)
+                        report_input = _reference_for_record(handle_input, job.scanner)
                     except Exception as ex:  # pylint: disable=W0718
                         if fail_on_error:
                             raise
@@ -1378,7 +1387,7 @@ async def _scan_one(
                         # reference to the source (identity plus content filters),
                         # and surface the read failure as this row's error --
                         # never a clean result over unreadable content.
-                        report_input = _reference_for_record(handle_input)
+                        report_input = _reference_for_record(handle_input, job.scanner)
                         logger.warning(
                             "Unable to read transcript %s for the result record; "
                             "recording a reference to the source instead.",
@@ -1394,11 +1403,7 @@ async def _scan_one(
                                 refusal=False,
                             )
             elif record_input == "reference" and isinstance(loader_input, Transcript):
-                report_input = ReferenceTranscript(
-                    source_uri=loader_input.source_uri,
-                    transcript_id=loader_input.transcript_id,
-                    content_json=None,
-                )
+                report_input = _reference_for_record(loader_input, job.scanner)
             else:
                 # A cast, not `assert loader_input is not None`: a loader
                 # yielding None is contained above (`type_and_ids` stays None,
