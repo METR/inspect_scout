@@ -1,8 +1,20 @@
 """Pattern-based transcript scanner using grep-style matching."""
 
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
+from dataclasses import replace
+from typing import TypeVar
+
 from .._scanner.result import Reference, Result
-from .._scanner.scanner import SCANNER_NAME_ATTR, Scanner, scanner
-from .._transcript.types import Transcript
+from .._scanner.scanner import (
+    SCANNER_CONTENT_ATTR,
+    SCANNER_NAME_ATTR,
+    Scanner,
+    mark_streaming_support,
+    scanner,
+)
+from .._transcript.handle import TranscriptHandle
+from .._transcript.types import Transcript, TranscriptContent
 from ._match import (
     Match,
     compile_pattern,
@@ -11,7 +23,7 @@ from ._match import (
 )
 
 
-@scanner(messages="all")
+@scanner(messages="all", supports_streaming=True)
 def grep_scanner(
     pattern: str | list[str] | dict[str, str | list[str]],
     *,
@@ -19,6 +31,7 @@ def grep_scanner(
     ignore_case: bool = True,
     word_boundary: bool = False,
     name: str | None = None,
+    metadata: bool | None = None,
 ) -> Scanner[Transcript]:
     r"""Pattern-based transcript scanner.
 
@@ -31,6 +44,9 @@ def grep_scanner(
     - Events are searched if `transcript.events` is populated
     - Control population via `@scanner(messages=..., events=...)`
 
+    Also accepts a `TranscriptHandle`, searching messages and events
+    incrementally and retaining matches rather than the full transcript.
+
     Args:
         pattern: Pattern(s) to search for. Can be:
             - str: Single pattern
@@ -42,7 +58,12 @@ def grep_scanner(
         ignore_case: Case-insensitive matching. Default True (like grep -i).
         word_boundary: Match whole words only (adds \b anchors). Default False.
         name: Scanner name.
-            Use this to assign a name when passing `llm_scanner()` directly to `scan()` rather than delegating to it from another scanner.
+            Use this to assign a name when passing `grep_scanner()` directly to `scan()` rather than delegating to it from another scanner.
+        metadata: Whether to read the sample's full metadata, target and scores
+            from the log body. Defaults to the wrapping scanner's setting
+            (True if unset). False keeps the summary values instead. All
+            scanners sharing a transcript read must decline metadata to skip
+            ingestion. Does not affect matching or results.
 
     Returns:
         Scanner that returns:
@@ -80,74 +101,63 @@ def grep_scanner(
     if isinstance(pattern, dict) and len(pattern) == 0:
         raise ValueError("Pattern dict cannot be empty")
 
-    async def scan(transcript: Transcript) -> Result | list[Result]:
-        if isinstance(pattern, dict):
-            # Labeled patterns - return multiple results
-            return _scan_labeled(transcript, pattern, regex, ignore_case, word_boundary)
-        else:
-            # Single or list pattern - return single result
-            return _scan_single(transcript, pattern, regex, ignore_case, word_boundary)
+    async def scan(transcript: Transcript | TranscriptHandle) -> Result | list[Result]:
+        groups: dict[str | None, str | list[str]] = (
+            {label: patterns for label, patterns in pattern.items()}
+            if isinstance(pattern, dict)
+            else {None: pattern}
+        )
+        compiled = {
+            label: [
+                compile_pattern(p, regex, ignore_case, word_boundary)
+                for p in ([patterns] if isinstance(patterns, str) else patterns)
+            ]
+            for label, patterns in groups.items()
+        }
+        matches: dict[str | None, list[Match]] = {label: [] for label in groups}
+
+        messages = (
+            transcript.messages
+            if isinstance(transcript, Transcript)
+            else transcript.messages()
+        )
+        async with aclosing(_indexed(messages)) as source:
+            async for index, message in source:
+                for label, patterns in compiled.items():
+                    matches[label].extend(
+                        replace(match, index=index)
+                        for match in find_matches_in_messages([message], patterns)
+                    )
+
+        events = (
+            transcript.events
+            if isinstance(transcript, Transcript)
+            else transcript.events()
+        )
+        async with aclosing(_indexed(events)) as event_source:
+            async for index, event in event_source:
+                for label, patterns in compiled.items():
+                    matches[label].extend(
+                        replace(match, index=index)
+                        for match in find_matches_in_events([event], patterns)
+                    )
+
+        results: list[Result] = []
+        for label, found in matches.items():
+            result = _build_result(found)
+            result.label = label
+            results.append(result)
+        return results if isinstance(pattern, dict) else results[0]
 
     # set name for collection by @scanner if specified
     if name is not None:
         setattr(scan, SCANNER_NAME_ATTR, name)
 
+    if metadata is not None:
+        setattr(scan, SCANNER_CONTENT_ATTR, TranscriptContent(metadata=metadata))
+    # Preserve streaming when another @scanner factory returns this callable.
+    mark_streaming_support(scan, True)
     return scan
-
-
-def _scan_single(
-    transcript: Transcript,
-    pattern: str | list[str],
-    regex: bool,
-    ignore_case: bool,
-    word_boundary: bool,
-) -> Result:
-    """Scan with single pattern or list of patterns, returning single result."""
-    patterns = [pattern] if isinstance(pattern, str) else pattern
-    compiled = [compile_pattern(p, regex, ignore_case, word_boundary) for p in patterns]
-
-    all_matches: list[Match] = []
-
-    # Search messages if present
-    if transcript.messages:
-        all_matches.extend(find_matches_in_messages(transcript.messages, compiled))
-
-    # Search events if present
-    if transcript.events:
-        all_matches.extend(find_matches_in_events(transcript.events, compiled))
-
-    return _build_result(all_matches)
-
-
-def _scan_labeled(
-    transcript: Transcript,
-    patterns: dict[str, str | list[str]],
-    regex: bool,
-    ignore_case: bool,
-    word_boundary: bool,
-) -> list[Result]:
-    """Scan with labeled patterns, returning one result per label."""
-    results: list[Result] = []
-
-    for label, label_patterns in patterns.items():
-        pats = [label_patterns] if isinstance(label_patterns, str) else label_patterns
-        compiled = [compile_pattern(p, regex, ignore_case, word_boundary) for p in pats]
-
-        matches: list[Match] = []
-
-        # Search messages if present
-        if transcript.messages:
-            matches.extend(find_matches_in_messages(transcript.messages, compiled))
-
-        # Search events if present
-        if transcript.events:
-            matches.extend(find_matches_in_events(transcript.events, compiled))
-
-        result = _build_result(matches)
-        result.label = label
-        results.append(result)
-
-    return results
 
 
 def _build_result(matches: list[Match]) -> Result:
@@ -176,3 +186,24 @@ def _build_result(matches: list[Match]) -> Result:
         explanation="\n".join(explanation_parts),
         references=references,
     )
+
+
+T = TypeVar("T")
+
+
+async def _indexed(
+    items: list[T] | AsyncIterator[T],
+) -> AsyncGenerator[tuple[int, T], None]:
+    """Number content and close iteration without closing the shared handle."""
+    if isinstance(items, list):
+        for index, item in enumerate(items, start=1):
+            yield index, item
+    else:
+        try:
+            index = 0
+            async for item in items:
+                index += 1
+                yield index, item
+        finally:
+            if isinstance(items, AsyncGenerator):
+                await items.aclose()

@@ -350,7 +350,11 @@ Rules worth knowing:
 
 -   `llm_scanner()` decides for itself per instance --- it streams unless `question` or `template_variables` is a callable or a timeline is requested --- so wrapping it as shown in [LLM Scanner](llm_scanner.qmd) needs no declaration.
 
+-   `grep_scanner()` supports streaming, including when returned from another scanner, as shown in [Grep Scanner](grep_scanner.qmd).
+
 -   A scanner that requests a `timeline` always receives a materialized transcript.
+
+-   Custom loaders require materialized input and disable streaming.
 
 -   Declaring `supports_streaming=True` on a scan function whose parameter is annotated plain `Transcript` raises a `TypeError` when the scanner is constructed.
 

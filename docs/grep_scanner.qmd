@@ -112,6 +112,18 @@ grep_scanner("error", word_boundary=True)
 
 This adds `\b` word boundary anchors around the pattern.
 
+## Large Transcripts
+
+The grep scanner supports [streaming](custom_scanner.qmd#streaming), reading messages and events incrementally and retaining matches rather than the full transcript. This also works when returning `grep_scanner()` from another `@scanner` function, as in the examples above. All scanners sharing a transcript must support streaming for the scan to use it.
+
+By default, the sample's full metadata, target, and scores are read from the log body, unless the wrapping `@scanner` specifies `metadata=False`. To keep only the summary values, pass `metadata=False`:
+
+```python
+grep_scanner("error", metadata=False)
+```
+
+This does not change what grep searches or the returned results. All scanners sharing a transcript read must decline metadata to skip reading it.
+
 ## Scanner Results
 
 ### Result Structure

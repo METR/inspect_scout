@@ -341,7 +341,8 @@ def scanner(
           grants permission -- the scan function must accept
           `Transcript | TranscriptHandle` -- and a verdict against streaming
           still revokes it; `False` forbids it. A scan streams only when every
-          scanner sharing the transcript is permitted.
+          scanner sharing the transcript is permitted. Custom loaders require
+          materialized input.
        metrics: One or more metrics to calculate over the values
            (only used if scanner is converted to a scorer via `as_scorer()`).
 
@@ -499,6 +500,10 @@ def scanner(
                 scanner_config.supports_streaming = (
                     supports_streaming and vouched is not False
                 )
+
+            # Streaming bypasses loaders, so custom loaders need materialized input.
+            if loader is not None:
+                scanner_config.supports_streaming = False
 
             registry_tag(
                 factory_fn,
