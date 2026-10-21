@@ -8592,6 +8592,15 @@
             "title": "Max Transcripts",
             "type": "integer"
           },
+          "record_input": {
+            "default": "copy",
+            "enum": [
+              "copy",
+              "reference"
+            ],
+            "title": "Record Input",
+            "type": "string"
+          },
           "results_buffer": {
             "anyOf": [
               {
@@ -8619,7 +8628,8 @@
           }
         },
         "required": [
-          "max_transcripts"
+          "max_transcripts",
+          "record_input"
         ],
         "title": "ScanOptions",
         "type": "object"
@@ -9342,6 +9352,9 @@
                   "$ref": "#/components/schemas/Timeline"
                 },
                 "type": "array"
+              },
+              {
+                "type": "null"
               }
             ],
             "title": "Input"
@@ -9371,8 +9384,7 @@
           }
         },
         "required": [
-          "input_type",
-          "input"
+          "input_type"
         ],
         "title": "ScannerInputResponse",
         "type": "object"
