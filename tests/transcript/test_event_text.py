@@ -17,6 +17,7 @@ from inspect_ai.event import (
     SampleLimitEvent,
     SandboxEvent,
     ScoreEvent,
+    SentinelEvent,
     StateEvent,
     StoreEvent,
 )
@@ -99,6 +100,17 @@ _EVENT_SAMPLES: dict[str, Event] = {
     "sandbox": SandboxEvent(action="exec", cmd="ls"),
     "score": ScoreEvent(score=Score(value="C")),
     "score_edit": ScoreEditEvent(score_name="s", edit=ScoreEdit(value="I")),
+    "sentinel": SentinelEvent(
+        kind="observation",
+        factory="protocol",
+        path="protocol",
+        function="decide",
+        step_id="call-1",
+        conversation="conv-1",
+        stage="tool_call",
+        status="reported",
+        suspicion=0.5,
+    ),
     "state": StateEvent(changes=[]),
     "store": StoreEvent(changes=[]),
 }
