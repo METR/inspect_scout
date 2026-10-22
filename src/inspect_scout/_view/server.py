@@ -26,6 +26,7 @@ from inspect_scout._view.types import ViewConfig
 
 from .._display._display import display
 from ._api_v2 import v2_api_app
+from ._input_reference import source_uri_locator
 
 _IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
 _DIST_DIR = Path(__file__).parent / "dist"
@@ -120,7 +121,11 @@ def view_server(
     # ensure we've resolved the dist directory
     directory = _resolve_dist_directory()
 
-    v2_api = v2_api_app(view_config=config, dist_path=directory)
+    v2_api = v2_api_app(
+        view_config=config,
+        dist_path=directory,
+        input_reference_locator=source_uri_locator,
+    )
 
     if authorization:
         v2_api.add_middleware(AuthorizationMiddleware, authorization=authorization)
