@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Literal, get_args
 
-from .._transcript.types import EventType, MessageType
+from .._transcript.types import EventFilter, EventType, MessageType
 
 
 def _reject_bare_string(filter: object, param: str) -> None:
@@ -80,6 +80,34 @@ TIMELINE_DEFAULT_EVENTS: list[EventType] = [
 ]
 
 
+def widen_timeline_for_events(
+    timeline: Literal[True] | list[EventType] | Literal["all"] | None,
+    events: EventFilter,
+) -> list[EventType] | Literal["all"] | None:
+    """Widen a timeline filter to cover an explicit events selection.
+
+    Interleaved entries render from the timeline, which its own filter prunes,
+    so a selected type missing from that filter would silently not render
+    (e.g. ``score`` under ``timeline=True``'s default set).
+    """
+    if timeline is True:
+        timeline = normalize_timeline_filter(True)
+    if timeline is None:
+        return timeline
+    if timeline == "all" or events == "all":
+        return "all"
+    if events is None:
+        return timeline
+    # Iterate the known event types rather than the selection: `events` admits
+    # arbitrary strings, and only real event types can widen a timeline filter.
+    selected = set(events)
+    widened = list(timeline)
+    for event_type in get_args(EventType):
+        if event_type in selected and event_type not in widened:
+            widened.append(event_type)
+    return widened if len(widened) > len(timeline) else timeline
+
+
 def normalize_timeline_filter(
     filter: Literal[True] | list[EventType] | Literal["all"],
 ) -> list[EventType] | Literal["all"]:
@@ -110,26 +138,7 @@ def validate_events_filter(
         return
     # "all" is deliberately absent: it selects every event as a bare filter, but
     # inside a list it is matched against event types, where nothing carries it.
-    allowed: set[str] = {
-        "model",
-        "tool",
-        "sample_init",
-        "sample_limit",
-        "sandbox",
-        "state",
-        "store",
-        "approval",
-        "sentinel",
-        "compaction",
-        "branch",
-        "input",
-        "score",
-        "error",
-        "logger",
-        "info",
-        "span_begin",
-        "span_end",
-    }
+    allowed: set[str] = set(get_args(EventType))
     if not filter:
         raise ValueError(f"{param}=[] is not allowed; provide at least one filter")
     bad = [x for x in filter if x not in allowed]

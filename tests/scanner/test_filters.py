@@ -1,7 +1,7 @@
 """Tests for message and event filter functionality."""
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from inspect_scout import EventType, MessageType
@@ -154,6 +154,25 @@ def test_deprecated_event_filters() -> None:
         validate_events_filter(["subtask"])  # type: ignore[list-item]
 
 
+def test_event_type_covers_event_union() -> None:
+    """EventType should name every Event in the union but the ones listed here.
+
+    StepEvent and SubtaskEvent are deprecated. CommunicationEvent and SwarmEvent
+    (inspect-ai 0.3.288) have no filter yet.
+    """
+    from inspect_ai.event._event import Event
+    from inspect_scout._scanner.validate import TYPE_TO_EVENT_FILTER
+
+    unmapped = {t.__name__ for t in get_args(Event) if t not in TYPE_TO_EVENT_FILTER}
+    assert unmapped == {
+        "StepEvent",
+        "SubtaskEvent",
+        "CommunicationEvent",
+        "SwarmEvent",
+    }
+    assert set(get_args(EventType)) == set(TYPE_TO_EVENT_FILTER.values())
+
+
 def test_none_event_filter() -> None:
     """None filter should not raise."""
     validate_events_filter(None)  # Should not raise
@@ -166,28 +185,7 @@ def test_event_filter_order_preserved() -> None:
     assert result == ["tool", "model", "error"]
 
 
-@pytest.mark.parametrize(
-    "filter_type",
-    [
-        "model",
-        "tool",
-        "sample_init",
-        "sample_limit",
-        "sandbox",
-        "state",
-        "store",
-        "approval",
-        "sentinel",
-        "input",
-        "score",
-        "error",
-        "logger",
-        "info",
-        "span_begin",
-        "span_end",
-        "compaction",
-    ],
-)
+@pytest.mark.parametrize("filter_type", get_args(EventType))
 def test_each_event_type(filter_type: EventType) -> None:
     """Each event type should be valid on its own."""
     validate_events_filter([filter_type])
