@@ -115,6 +115,8 @@ Whether a row is a copy or a reference is visible in the `input_storage` column,
 
 A NULL `input_content` on a reference row means the filters weren't available when the row was recorded, and resolving the reference falls back to full content (`messages="all", events="all"`).
 
+Only whole-transcript inputs are recorded by reference. Scanners whose input is a message, event or timeline, and scanners with a custom `@loader` (which may change the transcript it yields), record their input inline in either mode, unless the serialized input exceeds the parquet cell cap, in which case it is recorded as a reference with full content.
+
 A `record_input="reference"` scan also records `transcript_metadata` in the thinned form eval log summaries use (long strings shortened, other values over 1 KB removed), since a sample's metadata can be as large as its transcript. Resolve the reference to get the full metadata.
 
 Even a `record_input="copy"` scan can produce reference rows: when a transcript's serialized input is too large to store inline, or otherwise can't be read, Scout degrades that row to a reference rather than failing the scan. Filter by `input_storage == "reference"` to find these rows regardless of the scan's `record_input` setting.
@@ -129,5 +131,7 @@ if row.get("input_storage") == "reference":
 ```
 
 If the scan read a transcript database, `transcript_source_uri` is each transcript's original source (e.g. the `.eval` it was imported from) rather than the database. Pass the database location instead with `resolve_input_reference(row, transcripts="<database location>")`.
+
+The Scout viewer (`scout view`) resolves reference rows when you open a result: it reads the sample named by `transcript_source_uri` and `transcript_id`, with your own credentials, and shows the input as it would show a copy. If the source has moved or can't be read, the viewer says why instead.
 
 Result files written before these columns existed have no `input_storage` column at all; reading such a file, rows are treated as non-references.
