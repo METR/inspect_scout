@@ -132,6 +132,7 @@ def test_scan_batch_default(
     assert not results_dir.exists()
     assert status.spec.options.max_transcripts == case.expected_cap
     assert status.spec.model is not None
-    assert status.spec.model.config.max_connections == (
-        case.connections if case.connections is not None else case.expected_cap
-    )
+    # The spec records the model's own config, which carries only an explicit
+    # `max_connections`: the default is resolved after the model and applied to
+    # the active config (see `resolve_connection_limit`).
+    assert status.spec.model.config.max_connections == case.connections
